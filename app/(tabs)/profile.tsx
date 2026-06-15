@@ -95,6 +95,15 @@ export default function ProfileScreen() {
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
+            <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => router.push('/upload')}>
+              <View style={styles.menuLeft}>
+                <View style={[styles.menuIcon, { backgroundColor: 'rgba(90, 200, 250, 0.15)' }]}>
+                  <Ionicons name="cloud-upload-outline" size={20} color="#5AC8FA" />
+                </View>
+                <Text style={[styles.menuText, { color: colors.textPrimary }]}>Upload Book</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]}>
               <View style={styles.menuLeft}>
                 <View style={[styles.menuIcon, { backgroundColor: 'rgba(52, 199, 89, 0.15)' }]}>
@@ -162,6 +171,16 @@ export default function ProfileScreen() {
                 <Ionicons name="settings-outline" size={20} color={colors.primary} />
               </View>
               <Text style={[styles.menuText, { color: colors.textPrimary }]}>Settings</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => router.push('/upload')}>
+            <View style={styles.menuLeft}>
+              <View style={[styles.menuIcon, { backgroundColor: 'rgba(90, 200, 250, 0.15)' }]}>
+                <Ionicons name="cloud-upload-outline" size={20} color="#5AC8FA" />
+              </View>
+              <Text style={[styles.menuText, { color: colors.textPrimary }]}>Upload Book</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
           </TouchableOpacity>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/context/ThemeContext';
-import { getSemesterBooks } from '../../src/services/googleBooks';
+import { getSemesterBooksSync } from '../../src/services/googleBooks';
+import { getUploadedBooksBySemester } from '../../src/services/uploadService';
 import { Book } from '../../src/types';
 
 const SEMESTERS = [
@@ -25,29 +26,100 @@ const SEMESTERS = [
   { key: 'semester_6', label: '6', title: 'Semester 6' },
 ];
 
+// Cache for all semesters
+const semesterCache = new Map<string, Book[]>();
+const SEMESTER_KEYS = SEMESTERS.map(s => s.key);
+
 export default function CurriculumScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
   const [selectedSem, setSelectedSem] = useState('semester_1');
-  const [books, setBooks] = useState<Book[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [books, setBooks] = useState<Book[]>(() => getSemesterBooksSync('semester_1'));
+  const [loading, setLoading] = useState(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    loadBooks();
-  }, [selectedSem]);
+    return () => { mountedRef.current = false; };
+  }, []);
 
-  const loadBooks = async () => {
-    setLoading(true);
-    try {
-      const data = await getSemesterBooks(selectedSem);
-      setBooks(data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+  const loadUploadedBooks = useCallback(async (semester: string) => {
+    const cached = semesterCache.get(semester);
+    if (cached) {
+      if (mountedRef.current) setBooks(cached);
+      return;
     }
-  };
+
+    setLoading(true);
+    const baseBooks = getSemesterBooksSync(semester);
+
+    try {
+      const uploaded = await Promise.race([
+        getUploadedBooksBySemester(semester),
+        new Promise<[]>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+      ]) as any[];
+
+      const uploadedAsBooks: Book[] = (uploaded || []).map(ub => ({
+        id: `uploaded-${ub.id}`,
+        title: ub.title,
+        authors: [ub.author],
+        description: `Uploaded course book for ${ub.course}`,
+        thumbnail: ub.thumbnail || '',
+        publishedDate: '',
+        pageCount: 0,
+        categories: [ub.course],
+        averageRating: 0,
+        ratingsCount: 0,
+        previewLink: ub.pdfUrl,
+        infoLink: ub.pdfUrl,
+        downloadUrl: ub.pdfUrl,
+      }));
+
+      const merged = [...uploadedAsBooks, ...baseBooks];
+      semesterCache.set(semester, merged);
+      if (mountedRef.current) setBooks(merged);
+    } catch {
+      if (mountedRef.current) setBooks(baseBooks);
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUploadedBooks(selectedSem);
+  }, [selectedSem, loadUploadedBooks]);
+
+  // Preload adjacent semesters
+  useEffect(() => {
+    const idx = SEMESTER_KEYS.indexOf(selectedSem);
+    const toPreload = [];
+    if (idx > 0) toPreload.push(SEMESTER_KEYS[idx - 1]);
+    if (idx < SEMESTER_KEYS.length - 1) toPreload.push(SEMESTER_KEYS[idx + 1]);
+    for (const sem of toPreload) {
+      if (!semesterCache.has(sem)) {
+        getSemesterBooksSync(sem);
+        getUploadedBooksBySemester(sem).then(uploaded => {
+          const base = getSemesterBooksSync(sem);
+          const mapped = (uploaded || []).map(ub => ({
+            id: `uploaded-${ub.id}`,
+            title: ub.title,
+            authors: [ub.author],
+            description: `Uploaded course book for ${ub.course}`,
+            thumbnail: ub.thumbnail || '',
+            publishedDate: '',
+            pageCount: 0,
+            categories: [ub.course],
+            averageRating: 0,
+            ratingsCount: 0,
+            previewLink: ub.pdfUrl,
+            infoLink: ub.pdfUrl,
+            downloadUrl: ub.pdfUrl,
+          }));
+          semesterCache.set(sem, [...mapped, ...base]);
+        }).catch(() => {});
+      }
+    }
+  }, [selectedSem]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -55,7 +127,6 @@ export default function CurriculumScreen() {
         contentContainerStyle={[styles.scroll, { paddingTop: insets.top + Spacing.lg, paddingBottom: 100 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <View style={[styles.iconWrap, { backgroundColor: colors.primarySoft }]}>
@@ -68,7 +139,6 @@ export default function CurriculumScreen() {
           </View>
         </View>
 
-        {/* Semester tabs */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -90,7 +160,6 @@ export default function CurriculumScreen() {
           ))}
         </ScrollView>
 
-        {/* Books */}
         {loading ? (
           <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
         ) : (
@@ -103,14 +172,20 @@ export default function CurriculumScreen() {
                 activeOpacity={0.7}
               >
                 <View style={[styles.bookCover, { backgroundColor: colors.surface }]}>
-                  <Image source={{ uri: book.thumbnail }} style={styles.bookImage} />
+                  {book.thumbnail ? (
+                    <Image source={{ uri: book.thumbnail }} style={styles.bookImage} />
+                  ) : (
+                    <View style={styles.placeholderCover}>
+                      <Ionicons name="document-text" size={28} color={colors.textSecondary} />
+                    </View>
+                  )}
                 </View>
                 <View style={styles.bookInfo}>
                   <Text style={[styles.bookTitle, { color: colors.textPrimary }]} numberOfLines={2}>{book.title}</Text>
                   <Text style={[styles.bookAuthor, { color: colors.primary }]} numberOfLines={1}>{book.authors[0]}</Text>
                   <View style={styles.bookMeta}>
                     <Ionicons name="download-outline" size={12} color={colors.textMuted} />
-                    <Text style={[styles.bookDownloads, { color: colors.textMuted }]}>{book.ratingsCount?.toLocaleString()}</Text>
+                    <Text style={[styles.bookDownloads, { color: colors.textMuted }]}>{book.ratingsCount?.toLocaleString() || 'Uploaded'}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -158,6 +233,10 @@ const styles = StyleSheet.create({
     width: 80, height: 120,
   },
   bookImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  placeholderCover: {
+    width: '100%', height: '100%',
+    justifyContent: 'center', alignItems: 'center',
+  },
   bookInfo: { flex: 1, padding: Spacing.md, justifyContent: 'center' },
   bookTitle: {
     fontSize: FontSize.md, fontWeight: '700',

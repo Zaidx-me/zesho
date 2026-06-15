@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -33,7 +33,7 @@ export default function BookDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, skipped } = useAuth();
+  const { user } = useAuth();
   const { colors } = useTheme();
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,31 +41,52 @@ export default function BookDetailScreen() {
   const [bookStatus, setBookStatus] = useState<string>('want_to_read');
   const [userRating, setUserRating] = useState(0);
   const [notes, setNotes] = useState<Note[]>([]);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => { loadBook(); }, [id]);
 
   const loadBook = async () => {
     if (!id) return;
     setLoading(true);
-    try {
-      const bookData = await getBookById(id);
-      setBook(bookData);
-      if (user && bookData) {
-        const inLib = await isInLibrary(user.uid, id);
+
+    // Load book metadata from memory (instant)
+    const bookData = await getBookById(id);
+    if (!mountedRef.current) return;
+    setBook(bookData);
+
+    // If no user, stop here
+    if (!user || !bookData) {
+      if (mountedRef.current) setLoading(false);
+      return;
+    }
+
+    // Firestore calls in background - don't block the UI
+    Promise.all([
+      isInLibrary(user.uid, id).catch(() => false),
+      getNotesForBook(user.uid, id).catch(() => [] as Note[]),
+    ]).then(([inLib, bookNotes]) => {
+      if (mountedRef.current) {
         setInLibrary(inLib);
-        const bookNotes = await getNotesForBook(user.uid, id);
+        if (inLib) {
+          // Try to get status/rating from userBooks (simple approach)
+          setBookStatus('want_to_read');
+          setUserRating(0);
+        }
         setNotes(bookNotes);
       }
-    } catch (e) {
-      console.error('Error loading book:', e);
-    } finally {
-      setLoading(false);
-    }
+    });
+
+    // Show UI immediately after book data loads (no waiting for Firestore)
+    if (mountedRef.current) setLoading(false);
   };
 
-  const handleShare = async () => {
+  const handleShare = () => {
     if (!book) return;
-    await Share.share({
+    Share.share({
       message: `Read "${book.title}" by ${book.authors.join(', ')}\nhttps://archive.org/details/${book.id}`,
       title: book.title,
     });
@@ -73,7 +94,6 @@ export default function BookDetailScreen() {
 
   const handleReadNow = () => {
     if (!book) return;
-    // Google Drive books can be read in-app
     if (book.downloadUrl && book.downloadUrl.includes('drive.google.com')) {
       router.push(`/reader/${book.id}?url=${encodeURIComponent(book.downloadUrl)}&title=${encodeURIComponent(book.title)}`);
     } else {
@@ -85,7 +105,6 @@ export default function BookDetailScreen() {
   const handleDownloadPdf = () => {
     if (!book) return;
     const url = book.downloadUrl || getPdfUrl(book.id);
-    const isDrive = url.includes('drive.google.com');
     Alert.alert(
       'Download PDF',
       `Download "${book.title}" PDF?`,
@@ -97,7 +116,7 @@ export default function BookDetailScreen() {
   };
 
   const handleAddToLibrary = async () => {
-    if (skipped || !user) {
+    if (!user) {
       Alert.alert('Sign In Required', 'Sign in to save books', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Sign In', onPress: () => router.push('/(auth)/login') },
@@ -112,24 +131,28 @@ export default function BookDetailScreen() {
           { text: 'Remove', style: 'destructive', onPress: () => setInLibrary(false) },
         ]);
       } else {
-        await addBookToLibrary({
+        setInLibrary(true);
+        addBookToLibrary({
           id: `${user.uid}_${book.id}`, bookId: book.id, userId: user.uid,
           title: book.title, authors: book.authors, thumbnail: book.thumbnail,
           addedAt: Date.now(), status: 'want_to_read', progress: 0, rating: 0,
-        });
-        setInLibrary(true);
+        }).catch(() => setInLibrary(false));
       }
-    } catch (e) { console.error(e); }
+    } catch {}
   };
 
-  const handleStatusChange = async (s: string) => {
+  const handleStatusChange = (s: string) => {
     setBookStatus(s);
-    if (user && inLibrary && id) await updateBookStatus(user.uid, id, s as any).catch(() => {});
+    if (user && inLibrary && id) {
+      updateBookStatus(user.uid, id, s as any).catch(() => {});
+    }
   };
 
-  const handleRatingChange = async (r: number) => {
+  const handleRatingChange = (r: number) => {
     setUserRating(r);
-    if (user && inLibrary && id) await updateBookRating(user.uid, id, r).catch(() => {});
+    if (user && inLibrary && id) {
+      updateBookRating(user.uid, id, r).catch(() => {});
+    }
   };
 
   if (loading) return <View style={[styles.loading, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -146,13 +169,11 @@ export default function BookDetailScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* BG */}
         <View style={styles.bgWrap}>
           {book.thumbnail ? <Image source={{ uri: book.thumbnail }} style={styles.bgImg} /> : null}
           <LinearGradient colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.97)']} style={styles.bgGrad} />
         </View>
 
-        {/* Header */}
         <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.glass }]} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
@@ -162,9 +183,7 @@ export default function BookDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Body */}
         <View style={styles.body}>
-          {/* Cover row */}
           <View style={styles.coverRow}>
             <View style={[styles.coverWrap, { backgroundColor: colors.surface }]}>
               {book.thumbnail
@@ -179,7 +198,6 @@ export default function BookDetailScreen() {
             </View>
           </View>
 
-          {/* Stats */}
           <View style={[styles.stats, { backgroundColor: colors.glassLight }]}>
             <View style={styles.stat}>
               <Ionicons name="star" size={20} color="#FFD700" />
@@ -200,7 +218,6 @@ export default function BookDetailScreen() {
             </View>
           </View>
 
-          {/* Rating */}
           {inLibrary && (
             <View style={styles.pickerSection}>
               <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Your Rating</Text>
@@ -214,7 +231,6 @@ export default function BookDetailScreen() {
             </View>
           )}
 
-          {/* Status */}
           {inLibrary && (
             <View style={styles.pickerSection}>
               <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Status</Text>
@@ -232,7 +248,6 @@ export default function BookDetailScreen() {
             </View>
           )}
 
-          {/* Buttons */}
           <View style={styles.btns}>
             <TouchableOpacity style={[styles.readBtn, { backgroundColor: colors.primary }]} onPress={handleReadNow}>
               <Ionicons name="book" size={20} color={colors.white} />
@@ -253,7 +268,6 @@ export default function BookDetailScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Description */}
           {book.description ? (
             <View style={styles.section}>
               <Text style={[styles.secTitle, { color: colors.textPrimary }]}>About</Text>
@@ -261,7 +275,6 @@ export default function BookDetailScreen() {
             </View>
           ) : null}
 
-          {/* Categories */}
           {book.categories.length > 0 && (
             <View style={styles.section}>
               <Text style={[styles.secTitle, { color: colors.textPrimary }]}>Genres</Text>
@@ -275,7 +288,6 @@ export default function BookDetailScreen() {
             </View>
           )}
 
-          {/* Notes */}
           {notes.length > 0 && (
             <View style={styles.section}>
               <Text style={[styles.secTitle, { color: colors.textPrimary }]}>Notes ({notes.length})</Text>
@@ -296,16 +308,12 @@ export default function BookDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.sm },
-
   bgWrap: { position: 'absolute', top: 0, left: 0, right: 0, height: 300, overflow: 'hidden' },
   bgImg: { width: '100%', height: '100%', resizeMode: 'cover', opacity: 0.3 },
   bgGrad: { ...StyleSheet.absoluteFillObject },
-
   header: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
   iconBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-
   body: { marginTop: 70, paddingHorizontal: Spacing.xxl, paddingBottom: 100 },
-
   coverRow: { flexDirection: 'row', gap: Spacing.lg, marginBottom: Spacing.xxl },
   coverWrap: { width: 110, height: 165, borderRadius: BorderRadius.md, overflow: 'hidden', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
   cover: { width: '100%', height: '100%', resizeMode: 'cover' },
@@ -315,27 +323,23 @@ const styles = StyleSheet.create({
   bTitle: { fontSize: FontSize.xl, fontWeight: '800', marginBottom: Spacing.sm, lineHeight: 26 },
   bAuthor: { fontSize: FontSize.md, fontWeight: '500', marginBottom: 4 },
   bDate: { fontSize: FontSize.sm },
-
   stats: { flexDirection: 'row', borderRadius: BorderRadius.lg, padding: Spacing.lg, justifyContent: 'space-around', alignItems: 'center', marginBottom: Spacing.xxl },
   stat: { alignItems: 'center', flex: 1, gap: 3 },
   statV: { fontSize: FontSize.sm, fontWeight: '700' },
   statL: { fontSize: FontSize.xs },
   statD: { width: 1, height: 32 },
-
   pickerSection: { marginBottom: Spacing.lg },
   pickerLabel: { fontSize: FontSize.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: Spacing.sm },
   stars: { flexDirection: 'row', gap: Spacing.md },
   statusRow: { flexDirection: 'row', gap: Spacing.sm },
   statusBtn: { flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, alignItems: 'center', borderWidth: 1 },
   statusBtnT: { fontSize: FontSize.sm, fontWeight: '600' },
-
   btns: { marginBottom: Spacing.sm },
   readBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md + 2, borderRadius: BorderRadius.lg },
   readBtnT: { fontSize: FontSize.md, fontWeight: '700' },
   btnsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xxl },
   smBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1 },
   smBtnT: { fontSize: FontSize.sm, fontWeight: '600' },
-
   section: { marginBottom: Spacing.xxl },
   secTitle: { fontSize: FontSize.lg, fontWeight: '700', marginBottom: Spacing.md },
   desc: { fontSize: FontSize.md, lineHeight: 24 },

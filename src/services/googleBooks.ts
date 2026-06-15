@@ -39,7 +39,7 @@ const IA_BOOKS: Record<string, any[]> = {
     { id: 'narcissus-and-goldmund', title: 'Narcissus and Goldmund', author: 'Hermann Hesse', year: '1930', subject: 'fiction', downloads: 29000, pdfFile: 'Narcissus and Goldmund (Hermann Hesse_Berserker Books).pdf' },
     { id: 'ATreeGrowsInBrooklynByBettySmith', title: 'A Tree Grows in Brooklyn', author: 'Betty Smith', year: '1943', subject: 'fiction', downloads: 137450, pdfFile: 'A Tree Grows In Brooklyn by Betty Smith.pdf' },
     { id: 'Gadsby', title: 'Gadsby', author: 'Ernest Vincent Wright', year: '1939', subject: 'fiction', downloads: 102339, pdfFile: 'Gadsby.pdf' },
-    { id: 'PercyJacksonTheLightningThief', title: 'Percy Jackson: The Lightning Thief', author: 'Rick Riordan', year: '2005', subject: 'fiction', downloads: 197261, pdfFile: 'PERCY JACKSON -The Sea of Monsters.pdf' },
+    { id: 'PercyJacksonTheLightningThief', title: 'Percy Jackson: The Lightning Thief', author: 'Rick Riordan', year: '2005', subject: 'fiction', downloads: 197261, pdfFile: 'Percy Jackson - The Lightning Thief.pdf' },
   ],
   science: [
     { id: 'cosmos-carl-sagan', title: 'Cosmos', author: 'Carl Sagan', year: '1980', subject: 'astronomy', downloads: 85308, pdfFile: 'Cosmos [Carl Sagan].pdf' },
@@ -193,6 +193,16 @@ function mergeBookSources(): Record<string, Book[]> {
 
 // Dead collections removed - PROGRAMMING_BOOKS, CS_NOVELS, ACADEMIC_TEXTBOOKS all returned 404/400
 
+// Pre-built index for O(1) IA book lookups
+const IA_BOOK_INDEX = new Map<string, any>();
+(() => {
+  for (const books of Object.values(IA_BOOKS)) {
+    for (const book of books) {
+      IA_BOOK_INDEX.set(book.id, book);
+    }
+  }
+})();
+
 const SEMESTER_BOOKS: Record<string, { id: string; title: string; author: string; course: string }[]> = {
   semester_1: [
     { id: 'ComputerOrganizationAndDesign3rdEdition', title: 'Computer Organization and Design', author: 'Patterson & Hennessy', course: 'Intro to ICT' },
@@ -293,7 +303,15 @@ export async function getNovelBooks(): Promise<Book[]> {
 export async function getSemesterBooks(semester: string): Promise<Book[]> {
   const books = SEMESTER_BOOKS[semester] || [];
   return books.map(b => {
-    const found = Object.values(IA_BOOKS).flat().find(ib => ib.id === b.id);
+    const found = IA_BOOK_INDEX.get(b.id);
+    return found ? iaToBook(found) : driveToBook(b, 'semester');
+  });
+}
+
+export function getSemesterBooksSync(semester: string): Book[] {
+  const books = SEMESTER_BOOKS[semester] || [];
+  return books.map(b => {
+    const found = IA_BOOK_INDEX.get(b.id);
     return found ? iaToBook(found) : driveToBook(b, 'semester');
   });
 }
@@ -303,15 +321,15 @@ export function getPdfUrl(identifier: string): string {
   const iaAll = Object.values(IA_BOOKS).flat();
   const iaBook = iaAll.find(b => b.id === identifier);
   if (iaBook) {
-    return `https://archive.org/download/${identifier}/${iaBook.pdfFile}`;
+    return `https://archive.org/download/${identifier}/${encodeURIComponent(iaBook.pdfFile)}`;
   }
-  // Check Drive books — extract URL from id
+  // Check Drive books
   const allBooks = Object.values(ALL_BOOKS).flat();
   const book = allBooks.find(b => b.id === identifier);
   if (book && (book as any).downloadUrl) {
     return (book as any).downloadUrl;
   }
-  return `https://archive.org/download/${identifier}/${identifier}.pdf`;
+  return `https://archive.org/download/${identifier}/${encodeURIComponent(identifier)}.pdf`;
 }
 
 export function getBookPageUrl(identifier: string): string {
