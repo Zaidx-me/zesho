@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "933760260325",
+    "project_id": "zesho-app",
+    "storage_bucket": "zesho-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:933760260325:android:408d5063d4359a03899c0c",
+        "android_client_info": {
+          "package_name": "com.zaidxme.zesho"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC43tafb5N_wN96Wwru0Md3y6pWb78vlmU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
