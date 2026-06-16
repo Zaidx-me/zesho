@@ -10,12 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.zesho.app",
-      "config": {
-        "googleSignIn": {
-          "clientId": "YOUR_GOOGLE_CLIENT_ID"
-        }
-      }
+      "bundleIdentifier": "com.zesho.app"
     },
     "android": {
       "adaptiveIcon": {
