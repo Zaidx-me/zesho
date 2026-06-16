@@ -129,11 +129,11 @@ export default function NotificationsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.xxl, paddingBottom: Spacing.md },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   headerTitle: { fontSize: FontSize.xl, fontWeight: '700' },
   clearAll: { fontSize: FontSize.bodySm, fontWeight: '600' },
-  list: { paddingHorizontal: Spacing.xl, paddingBottom: 100 },
+  list: { paddingHorizontal: Spacing.xxl, paddingBottom: 100 },
   notifAnimated: { marginBottom: Spacing.sm },
   deleteBg: { position: 'absolute', right: 0, top: 0, bottom: 0, width: '100%', borderRadius: BorderRadius.md, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', paddingRight: Spacing.xl, gap: Spacing.sm },
   deleteText: { fontWeight: '600', fontSize: FontSize.bodySm },

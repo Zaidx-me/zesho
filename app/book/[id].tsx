@@ -8,10 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
-import { getBookById, getBookPageUrl, getPdfUrl } from '../../src/services/googleBooks';
+import { getBookById } from '../../src/services/googleBooks';
 import { addBookToLibrary, isInLibrary, getNotesForBook, updateBookStatus, updateBookRating } from '../../src/services/books';
-import { getUploadedBooks } from '../../src/services/uploadService';
-import { isAdmin, deleteUploadedBook } from '../../src/services/admin';
+
 import { Book, Note } from '../../src/types';
 import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 
@@ -31,8 +30,6 @@ export default function BookDetailScreen() {
   const { colors } = useTheme();
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isUploadedBook, setIsUploadedBook] = useState(false);
-  const admin = isAdmin(user?.email);
   const [inLibrary, setInLibrary] = useState(false);
   const [bookStatus, setBookStatus] = useState<string>('want_to_read');
   const [userRating, setUserRating] = useState(0);
@@ -48,8 +45,6 @@ export default function BookDetailScreen() {
     const bookData = await getBookById(id);
     if (!mountedRef.current) return;
     setBook(bookData);
-    const uploaded = await getUploadedBooks();
-    if (mountedRef.current) setIsUploadedBook(uploaded.some(b => b.id === id));
     if (!user || !bookData) { if (mountedRef.current) setLoading(false); return; }
     Promise.all([
       isInLibrary(user.uid, id).catch(() => false),
@@ -80,47 +75,25 @@ export default function BookDetailScreen() {
   const handleReadNow = () => {
     if (!book) return;
     let readerUrl = '';
-    let readerDownloadUrl = '';
     let openInBrowser = false;
 
-    if (book.id.startsWith('gutendex_')) {
-      const gId = parseInt(book.id.replace('gutendex_', ''), 10);
-      if (!isNaN(gId)) {
-        readerUrl = book.downloadUrl || `https://www.gutenberg.org/cache/epub/${gId}/pg${gId}.epub3.epub`;
-        readerDownloadUrl = `https://www.gutenberg.org/cache/epub/${gId}/pg${gId}.pdf`;
-      }
-    } else if (book.id.startsWith('hp_')) {
-      readerUrl = book.previewLink || `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(book.title)}`;
-    } else if (book.downloadUrl?.includes('archive.org')) {
-      const match = book.downloadUrl.match(/archive\.org\/download\/([^/]+)/);
-      if (match) {
-        readerUrl = `https://archive.org/embed/${match[1]}?ui=embed#mode/1up`;
-        readerDownloadUrl = book.downloadUrl;
-      }
-    } else if (book.previewLink?.includes('archive.org/embed')) {
-      readerUrl = book.previewLink;
-      readerDownloadUrl = book.downloadUrl || '';
-    } else if (book.downloadUrl?.includes('drive.google.com') || book.previewLink?.includes('drive.google.com')) {
+    if (book.downloadUrl?.includes('drive.google.com') || book.previewLink?.includes('drive.google.com')) {
       openInBrowser = true;
       readerUrl = book.downloadUrl || book.previewLink;
-    } else if (book.previewLink?.includes('openlibrary.org/works/')) {
-      openInBrowser = true;
+    } else if (book.previewLink?.includes('books.google.com')) {
       readerUrl = book.previewLink;
     } else if (book.previewLink) {
       readerUrl = book.previewLink;
-    } else {
-      readerUrl = getBookPageUrl(book.id);
-      openInBrowser = true;
     }
 
     if (!readerUrl) { Alert.alert('Not Available', 'Could not find a way to read this book.'); return; }
     if (openInBrowser) { Linking.openURL(readerUrl); return; }
-    router.push({ pathname: '/reader/[id]', params: { id: book.id, url: readerUrl, title: book.title, downloadUrl: readerDownloadUrl } });
+    router.push({ pathname: '/reader/[id]', params: { id: book.id, url: readerUrl, title: book.title } });
   };
 
   const handleDownload = () => {
     if (!book) return;
-    Linking.openURL(book.downloadUrl || getPdfUrl(book.id));
+    if (book.downloadUrl) Linking.openURL(book.downloadUrl);
   };
 
   const handleAddToLibrary = async () => {
@@ -173,6 +146,7 @@ export default function BookDetailScreen() {
     </View>
   );
 
+  const isPdfBook = book.id.startsWith('pdf_');
   const hasDriveLink = book.downloadUrl?.includes('drive.google.com') || book.previewLink?.includes('drive.google.com');
 
   return (
@@ -208,7 +182,7 @@ export default function BookDetailScreen() {
         </View>
 
         {/* Content body */}
-        <View style={[styles.body, { paddingHorizontal: Spacing.xl }]}>
+        <View style={[styles.body, { paddingHorizontal: Spacing.xxl }]}>
           {/* Title + Author */}
           <Text style={[styles.bookTitle, { color: colors.textPrimary }]} numberOfLines={3}>{book.title}</Text>
           <Text style={[styles.bookAuthor, { color: colors.coolSlate }]}>{book.authors.join(', ')}</Text>
@@ -233,6 +207,12 @@ export default function BookDetailScreen() {
                 <Text style={[styles.infoChipText, { color: colors.textPrimary }]}>{book.publishedDate}</Text>
               </View>
             )}
+            {isPdfBook && (
+              <View style={[styles.infoChip, { backgroundColor: colors.surfaceElevated }]}>
+                <Ionicons name="arrow-down-outline" size={14} color={colors.coolSlate} />
+                <Text style={[styles.infoChipText, { color: colors.coolSlate }]}>Download Only</Text>
+              </View>
+            )}
             {hasDriveLink && (
               <View style={[styles.infoChip, { backgroundColor: 'rgba(76, 175, 80, 0.15)' }]}>
                 <Ionicons name="cloud-download-outline" size={14} color={colors.success} />
@@ -243,13 +223,15 @@ export default function BookDetailScreen() {
 
           {/* Action buttons */}
           <View style={styles.actionRow}>
-            <TouchableOpacity style={[styles.readBtn, { backgroundColor: colors.buttonPrimary }]} onPress={handleReadNow} activeOpacity={0.8}>
-              <Ionicons name="book" size={18} color={colors.buttonPrimaryText} />
-              <Text style={[styles.readBtnText, { color: colors.buttonPrimaryText }]}>Read Now</Text>
+            <TouchableOpacity style={[styles.readBtn, { backgroundColor: colors.buttonPrimary }]} onPress={isPdfBook ? handleDownload : handleReadNow} activeOpacity={0.8}>
+              <Ionicons name={isPdfBook ? "arrow-down-outline" : "book"} size={18} color={colors.buttonPrimaryText} />
+              <Text style={[styles.readBtnText, { color: colors.buttonPrimaryText }]}>{isPdfBook ? 'Direct Download' : 'Read Now'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.downloadBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]} onPress={handleDownload} activeOpacity={0.8}>
-              <Ionicons name="arrow-down-outline" size={22} color={colors.textPrimary} />
-            </TouchableOpacity>
+            {!isPdfBook && (
+              <TouchableOpacity style={[styles.downloadBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]} onPress={handleDownload} activeOpacity={0.8}>
+                <Ionicons name="arrow-down-outline" size={22} color={colors.textPrimary} />
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Library toggle */}
@@ -333,21 +315,7 @@ export default function BookDetailScreen() {
             </View>
           )}
 
-          {/* Admin delete */}
-          {admin && isUploadedBook && (
-            <TouchableOpacity
-              style={[styles.deleteBtn, { backgroundColor: colors.error }]}
-              onPress={() => {
-                Alert.alert('Delete Book', `Remove "${book.title}" permanently?`, [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: async () => { await deleteUploadedBook(id); router.back(); } },
-                ]);
-              }}
-            >
-              <Ionicons name="trash-outline" size={16} color="#fff" />
-              <Text style={styles.deleteBtnText}>Delete Book</Text>
-            </TouchableOpacity>
-          )}
+
         </View>
       </ScrollView>
     </View>
@@ -380,7 +348,7 @@ const styles = StyleSheet.create({
   readBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md + 4, borderRadius: BorderRadius.lg },
   readBtnText: { fontSize: FontSize.bodyMd, fontWeight: '700' },
   downloadBtn: { width: 50, height: 50, borderRadius: BorderRadius.lg, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
-  libraryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1, marginBottom: Spacing.xl },
+  libraryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1, marginBottom: Spacing.sm },
   libraryBtnText: { fontSize: FontSize.bodyMd, fontWeight: '600' },
   ratingSection: { marginBottom: Spacing.lg },
   sectionLabel: { fontSize: FontSize.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: Spacing.sm },
@@ -399,6 +367,5 @@ const styles = StyleSheet.create({
   noteCard: { borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.sm, borderLeftWidth: 3 },
   noteText: { fontSize: FontSize.bodyMd, lineHeight: 22 },
   noteDate: { fontSize: FontSize.xs, marginTop: Spacing.xs },
-  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, marginBottom: Spacing.xl },
-  deleteBtnText: { color: '#fff', fontSize: FontSize.md, fontWeight: '700' },
+
 });

@@ -95,7 +95,7 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.xxl, paddingBottom: Spacing.md },
   backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
   title: { fontSize: FontSize.xl, fontWeight: '700' },
   content: { paddingHorizontal: Spacing.xxl, paddingBottom: 100 },

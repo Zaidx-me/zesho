@@ -14,6 +14,22 @@ interface BookRowProps {
   onSeeAll?: () => void;
 }
 
+function areBooksEqual(a: Book[], b: Book[]) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].thumbnail !== b[i].thumbnail) return false;
+  }
+  return true;
+}
+
+function areRowPropsEqual(prev: BookRowProps, next: BookRowProps) {
+  return prev.title === next.title
+    && prev.loading === next.loading
+    && prev.bookSize === next.bookSize
+    && prev.onSeeAll === next.onSeeAll
+    && areBooksEqual(prev.books, next.books);
+}
+
 export const BookRow = React.memo(function BookRow({ title, books, loading, bookSize = 130, onSeeAll }: BookRowProps) {
   const { colors } = useTheme();
 
@@ -53,7 +69,7 @@ export const BookRow = React.memo(function BookRow({ title, books, loading, book
       </ScrollView>
     </View>
   );
-});
+}, areRowPropsEqual);
 
 const styles = StyleSheet.create({
   container: {
@@ -64,7 +80,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: Spacing.md,
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.xxl,
   },
   title: {
     fontSize: FontSize.heading4,
@@ -76,7 +92,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   scrollContent: {
-    paddingHorizontal: Spacing.xl,
+    paddingHorizontal: Spacing.xxl,
     gap: Spacing.sm,
   },
   bookWrapper: {

@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xxl,
     paddingBottom: Spacing.md,
   },
   backBtn: {
@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   grid: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: Spacing.xxl,
     paddingBottom: 100,
   },
   row: {

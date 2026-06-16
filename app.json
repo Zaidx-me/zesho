@@ -8,11 +8,6 @@
     "userInterfaceStyle": "dark",
     "scheme": "zesho",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.zesho.app",

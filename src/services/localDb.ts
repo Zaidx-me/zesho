@@ -1,20 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserBook, Note } from '../types';
 
-export interface UploadedBook {
+export interface RequestedBook {
   id: string;
   title: string;
   author: string;
-  semester: string;
-  course: string;
-  pdfUrl: string;
+  reason?: string;
+  requestedBy: string | null;
+  requestedByName?: string;
   createdAt: number;
-  thumbnail?: string;
+  status: 'pending' | 'fulfilled' | 'rejected';
+  adminNote?: string;
 }
 
 function userBooksKey(userId: string) { return `local_books_${userId}`; }
 function userNotesKey(userId: string) { return `local_notes_${userId}`; }
-const UPLOADED_KEY = 'local_uploaded_books';
+const REQUESTS_KEY = 'local_book_requests';
 
 // ---- User Books ----
 export async function addBookToLibrary(book: UserBook) {
@@ -124,24 +125,35 @@ export async function getAllUserNotes(userId: string): Promise<Note[]> {
   return raw ? JSON.parse(raw) : [];
 }
 
-// ---- Uploaded Books ----
-export async function saveUploadedBook(book: UploadedBook) {
-  const raw = await AsyncStorage.getItem(UPLOADED_KEY);
-  const books: UploadedBook[] = raw ? JSON.parse(raw) : [];
-  books.unshift(book);
-  await AsyncStorage.setItem(UPLOADED_KEY, JSON.stringify(books));
+// ---- Book Requests ----
+export async function saveBookRequest(request: RequestedBook) {
+  const raw = await AsyncStorage.getItem(REQUESTS_KEY);
+  const requests: RequestedBook[] = raw ? JSON.parse(raw) : [];
+  requests.unshift(request);
+  await AsyncStorage.setItem(REQUESTS_KEY, JSON.stringify(requests));
 }
 
-export async function getUploadedBooks(): Promise<UploadedBook[]> {
-  const raw = await AsyncStorage.getItem(UPLOADED_KEY);
+export async function getBookRequests(): Promise<RequestedBook[]> {
+  const raw = await AsyncStorage.getItem(REQUESTS_KEY);
   return raw ? JSON.parse(raw) : [];
 }
 
-export async function getUploadedBooksBySemester(semester: string): Promise<UploadedBook[]> {
-  const raw = await AsyncStorage.getItem(UPLOADED_KEY);
-  if (!raw) return [];
-  const books: UploadedBook[] = JSON.parse(raw);
-  return books.filter(b => b.semester === semester);
+export async function updateBookRequest(id: string, updates: Partial<RequestedBook>) {
+  const raw = await AsyncStorage.getItem(REQUESTS_KEY);
+  if (!raw) return;
+  let requests: RequestedBook[] = JSON.parse(raw);
+  const idx = requests.findIndex(r => r.id === id);
+  if (idx !== -1) {
+    requests[idx] = { ...requests[idx], ...updates };
+    await AsyncStorage.setItem(REQUESTS_KEY, JSON.stringify(requests));
+  }
+}
+
+export async function deleteBookRequest(id: string) {
+  const raw = await AsyncStorage.getItem(REQUESTS_KEY);
+  if (!raw) return;
+  const requests: RequestedBook[] = JSON.parse(raw).filter(r => r.id !== id);
+  await AsyncStorage.setItem(REQUESTS_KEY, JSON.stringify(requests));
 }
 
 export async function clearUserLibrary(userId: string) {

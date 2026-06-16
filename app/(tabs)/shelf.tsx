@@ -1,166 +1,212 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  ActivityIndicator, RefreshControl,
+  RefreshControl, ListRenderItem,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { BookCard } from '../../src/components/BookCard';
+import { BookRow } from '../../src/components/BookRow';
+import { SkeletonRow } from '../../src/components/SkeletonLoader';
+import { RequestBookModal } from '../../src/components/RequestBookModal';
 import { Book } from '../../src/types';
 import { useTheme } from '../../src/context/ThemeContext';
-import { getCachedBooks } from '../../src/services/bookCache';
-import { getDismissedNotifications } from '../../src/services/localDb';
+import { getCachedBooks, preloadBooks } from '../../src/services/bookCache';
+import { getUrduBooksByMainCategory, getUrduMainCategories } from '../../src/services/urduBooks';
+import { getPdfBooksByMainCategory, getPdfTopCategories } from '../../src/services/pdfBooksFree';
 import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 
-const CATEGORIES = [
-  { label: 'All', key: 'popular', query: 'popular fiction' },
-  { label: 'Novels', key: 'fiction', query: 'classic literature' },
-  { label: 'Self Help', key: 'self-help', query: 'self help motivation' },
-  { label: 'Science', key: 'science', query: 'science nature' },
-  { label: 'Poetry', key: 'poetry', query: 'poetry anthology' },
-  { label: 'Urdu', key: 'urdu', query: 'urdu' },
-  { label: 'History', key: 'history', query: 'history' },
-  { label: 'Religion', key: 'religion', query: 'religion spirituality' },
-];
+type Tab = 'urdu' | 'pdf';
 
-const CategoryTabs = React.memo(function CategoryTabs({
-  activeCategory,
-  onSelect,
-  colors,
-}: {
-  activeCategory: string;
-  onSelect: (label: string) => void;
-  colors: any;
-}) {
-  const flatListRef = useRef<FlatList>(null);
+interface RowDef {
+  title: string;
+  key: string;
+  query: string;
+  shelfKey: string;
+}
 
-  return (
-    <FlatList
-      ref={flatListRef}
-      horizontal
-      data={CATEGORIES}
-      keyExtractor={(item) => item.label}
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.tabContent}
-      renderItem={({ item: cat }) => (
-        <TouchableOpacity
-          style={[styles.tab, { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
-            activeCategory === cat.label && { backgroundColor: colors.textPrimary }]}
-          onPress={() => onSelect(cat.label)}
-        >
-          <Text style={[
-            styles.tabText,
-            { color: activeCategory === cat.label ? colors.background : colors.textSecondary, fontWeight: activeCategory === cat.label ? '700' : '500' },
-          ]}>
-            {cat.label}
-          </Text>
-        </TouchableOpacity>
-      )}
-    />
-  );
-});
-
-export default function CategoryScreen() {
+export default function CollectionsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [books, setBooks] = useState<Book[]>([]);
+  const scrollRef = useRef<FlatList>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('urdu');
+  const [rowData, setRowData] = useState<Record<string, Book[]>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [hasUnread, setHasUnread] = useState(false);
-
-  const loadBooks = async (category: string) => {
-    setLoading(true);
-    try {
-      const cat = CATEGORIES.find(c => c.label === category);
-      if (!cat) return;
-      const result = await getCachedBooks(cat.key, cat.query, 20);
-      setBooks(result.filter(b => b.thumbnail));
-    } catch (error) {
-      console.error('Error loading books:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { loadBooks(activeCategory); }, [activeCategory]);
+  const [showRequest, setShowRequest] = useState(false);
+  const nav = useNavigation();
+  const lastTapRef = useRef(0);
 
   useEffect(() => {
-    getDismissedNotifications().then(d => setHasUnread(d.length < 3));
-  }, []);
+    const unsub = (nav as any).addListener('tabPress', () => {
+      const now = Date.now();
+      if (now - lastTapRef.current < 400) {
+        scrollRef.current?.scrollToOffset({ offset: 0, animated: true });
+        lastTapRef.current = 0;
+      } else {
+        lastTapRef.current = now;
+      }
+    });
+    return unsub;
+  }, [nav]);
 
-  const onRefresh = async () => {
+  const TABS: { key: Tab; label: string; icon: string }[] = [
+    { key: 'urdu', label: 'Urdu Books', icon: 'book' },
+    { key: 'pdf', label: 'PDF Books', icon: 'document-text' },
+  ];
+
+  const ROWS = useMemo<Record<Tab, RowDef[]>>(() => ({
+    urdu: getUrduMainCategories().map(c => ({
+      title: c.name, key: `urdu_${c.name}`, query: c.name,
+      shelfKey: `urdu_${c.name.toLowerCase().replace(/\s+/g, '_')}`,
+    })),
+    pdf: getPdfTopCategories(8).map(c => ({
+      title: c.name, key: `pdf_${c.name}`, query: c.name,
+      shelfKey: `pdf_${c.name.toLowerCase().replace(/\s+/g, '_')}`,
+    })),
+  }), []);
+
+  const currentRows = ROWS[activeTab];
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const results = await Promise.allSettled(
+        currentRows.map(row =>
+          activeTab === 'urdu'
+            ? Promise.resolve(getUrduBooksByMainCategory(row.query, 20))
+            : activeTab === 'pdf'
+            ? Promise.resolve(getPdfBooksByMainCategory(row.query, 20))
+            : getCachedBooks(row.key, row.query, 20)
+        )
+      );
+      const data: Record<string, Book[]> = {};
+      currentRows.forEach((row, i) => {
+        if (results[i].status === 'fulfilled') {
+          data[row.key] = results[i].value.filter((b: Book) => b.thumbnail);
+        } else {
+          data[row.key] = [];
+        }
+      });
+      setRowData(data);
+    } catch {}
+    setLoading(false);
+  }, [activeTab, currentRows]);
+
+  useEffect(() => {
+    preloadBooks();
+    loadData();
+  }, [loadData]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadBooks(activeCategory);
+    await loadData();
     setRefreshing(false);
-  };
+  }, [loadData]);
 
-  const handleCategorySelect = useCallback((label: string) => {
-    setActiveCategory(label);
-  }, []);
+  const handleSeeAll = useCallback((row: RowDef) => {
+    router.push({
+      pathname: '/shelf/[category]',
+      params: { category: row.shelfKey, title: row.title, query: row.query },
+    });
+  }, [router]);
 
-  const ListHeader = useCallback(() => (
-    <View>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
-        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Category</Text>
-        <TouchableOpacity onPress={() => router.push('/notifications')} style={styles.headerBtn}>
-          <Ionicons name="notifications-outline" size={22} color={colors.textPrimary} />
-          {hasUnread && <View style={[styles.badgeDot, { backgroundColor: colors.textPrimary }]} />}
-        </TouchableOpacity>
+  const renderItem = useCallback<ListRenderItem<RowDef>>(({ item }) => (
+    <BookRow
+      title={item.title}
+      books={rowData[item.key] || []}
+      bookSize={130}
+      onSeeAll={() => handleSeeAll(item)}
+    />
+  ), [rowData, handleSeeAll]);
+
+  const headerComponent = useMemo(() => (
+    <View style={{ paddingHorizontal: Spacing.xxl, marginBottom: Spacing.lg }}>
+      <Text style={[styles.pageTitle, { color: colors.textPrimary }]}>Collections</Text>
+
+      <View style={styles.tabRow}>
+        {TABS.map(tab => {
+          const isActive = activeTab === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={[
+                styles.tab,
+                { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                isActive && { backgroundColor: colors.textPrimary, borderColor: colors.textPrimary },
+              ]}
+              onPress={() => { setActiveTab(tab.key); setRowData({}); }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={tab.icon as any} size={16} color={isActive ? colors.background : colors.textSecondary} />
+              <Text style={[styles.tabLabel, { color: isActive ? colors.background : colors.textSecondary }, isActive && { fontWeight: '700' }]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {/* Tabs - memoized, won't remount */}
-      <CategoryTabs
-        activeCategory={activeCategory}
-        onSelect={handleCategorySelect}
-        colors={colors}
-      />
+      <TouchableOpacity
+        style={[styles.requestBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+        onPress={() => setShowRequest(true)}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="add-circle-outline" size={18} color={colors.textPrimary} />
+        <Text style={[styles.requestBtnText, { color: colors.textSecondary }]}>Can't find a book? Request it</Text>
+      </TouchableOpacity>
+    </View>
+  ), [colors, activeTab]);
 
-      {/* Loading */}
-      {loading && (
-        <View style={styles.loadingWrap}>
-          <ActivityIndicator size="large" color={colors.textPrimary} />
+  if (loading) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={{ paddingTop: insets.top + Spacing.md }}>
+          {headerComponent}
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
         </View>
-      )}
-    </View>
-  ), [insets.top, colors, activeCategory, hasUnread, loading, handleCategorySelect]);
-
-  const renderItem = useCallback(({ item }: { item: Book }) => (
-    <View style={styles.bookItem}>
-      <BookCard book={item} size={150} />
-    </View>
-  ), []);
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <FlatList
-        data={loading ? [] : books}
-        numColumns={2}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={ListHeader}
-        contentContainerStyle={styles.grid}
-        columnWrapperStyle={styles.gridRow}
+        ref={scrollRef}
+        data={currentRows}
+        keyExtractor={item => item.key}
         renderItem={renderItem}
+        ListHeaderComponent={headerComponent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + Spacing.md }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textSecondary} />}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        windowSize={4}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
       />
+      <RequestBookModal visible={showRequest} onClose={() => setShowRequest(false)} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
-  headerBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  headerTitle: { fontSize: FontSize.heading4, fontWeight: '700', letterSpacing: -0.3 },
-  badgeDot: { position: 'absolute', top: 8, right: 8, width: 7, height: 7, borderRadius: 4 },
-  tabContent: { gap: Spacing.sm, paddingVertical: Spacing.sm },
-  tab: { borderRadius: BorderRadius.full },
-  tabText: { fontSize: FontSize.bodyMd, fontWeight: '500' },
-  grid: { paddingHorizontal: Spacing.xl, paddingBottom: 100 },
-  gridRow: { justifyContent: 'space-between', gap: Spacing.sm },
-  bookItem: { marginBottom: Spacing.md },
-  loadingWrap: { height: 200, justifyContent: 'center', alignItems: 'center' },
+  scrollContent: { paddingBottom: 100 },
+  pageTitle: { fontSize: FontSize.heading3, fontWeight: '800', letterSpacing: -0.5, marginBottom: Spacing.md },
+  tabRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
+  tab: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.full, borderWidth: 1,
+  },
+  tabLabel: { fontSize: FontSize.sm, fontWeight: '500' },
+  requestBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
+    paddingVertical: Spacing.sm + 2, borderRadius: BorderRadius.md, borderWidth: 1, marginBottom: Spacing.lg,
+  },
+  requestBtnText: { fontSize: FontSize.sm, fontWeight: '500' },
 });

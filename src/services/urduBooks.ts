@@ -43,7 +43,7 @@ function compactToBook(book: CompactBook): Book {
 // Pre-build the full list at module load time
 const ALL_URDU_BOOKS: Book[] = data.books.map(compactToBook);
 
-// Build category index
+// Build category index — each book indexed by its categories field
 const CATEGORY_INDEX: Record<string, Book[]> = {};
 for (const book of ALL_URDU_BOOKS) {
   for (const cat of book.categories) {
@@ -53,13 +53,28 @@ for (const book of ALL_URDU_BOOKS) {
   }
 }
 
-export function getUrduBooksByCategory(category: string, limit: number = 20): Book[] {
-  const key = category.toLowerCase();
-  return (CATEGORY_INDEX[key] || []).slice(0, limit);
+// Build main-category index — each book indexed by its original cat field
+const MAIN_CATEGORY_INDEX: Record<string, Book[]> = {};
+for (const raw of data.books) {
+  for (const cat of raw.cat) {
+    if (!MAIN_CATEGORY_INDEX[cat]) MAIN_CATEGORY_INDEX[cat] = [];
+    MAIN_CATEGORY_INDEX[cat].push(compactToBook(raw));
+  }
 }
 
-export function getAllUrduBooks(limit: number = 50): Book[] {
-  return ALL_URDU_BOOKS.slice(0, limit);
+export function getUrduBooksByCategory(category: string, limit?: number): Book[] {
+  const key = category.toLowerCase();
+  const result = CATEGORY_INDEX[key] || [];
+  return limit ? result.slice(0, limit) : result;
+}
+
+export function getUrduBooksByMainCategory(mainCategory: string, limit?: number): Book[] {
+  const result = MAIN_CATEGORY_INDEX[mainCategory] || [];
+  return limit ? result.slice(0, limit) : result;
+}
+
+export function getAllUrduBooks(limit?: number): Book[] {
+  return limit ? ALL_URDU_BOOKS.slice(0, limit) : ALL_URDU_BOOKS;
 }
 
 export function searchUrduBooks(query: string, limit: number = 20): Book[] {
@@ -76,8 +91,25 @@ export function getUrduCategories(): string[] {
   return Object.keys(data.categories);
 }
 
+export function getUrduMainCategories(): { name: string; count: number }[] {
+  return Object.entries(data.categories)
+    .filter(([, count]) => count > 0)
+    .sort(([, a], [, b]) => b - a)
+    .map(([name, count]) => ({ name, count }));
+}
+
 export function getUrduCategoryCount(category: string): number {
   return data.categories[category] || 0;
+}
+
+export function getUrduSubcategories(mainCategory: string): string[] {
+  const subs = new Set<string>();
+  for (const raw of data.books) {
+    if (raw.cat.includes(mainCategory) && raw.sub) {
+      subs.add(raw.sub);
+    }
+  }
+  return Array.from(subs).sort();
 }
 
 export function getUrduBookCount(): number {

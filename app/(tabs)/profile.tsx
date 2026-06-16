@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
 } from 'react-native';
@@ -9,11 +9,13 @@ import { useAuth } from '../../src/context/AuthContext';
 import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/context/ThemeContext';
 import { clearUserLibrary } from '../../src/services/localDb';
+import { RequestBookModal } from '../../src/components/RequestBookModal';
 
 interface MenuItem {
   icon: string;
   label: string;
   route?: string;
+  action?: () => void;
 }
 
 export default function ProfileScreen() {
@@ -21,6 +23,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const { user, signOut } = useAuth();
+  const [showRequest, setShowRequest] = useState(false);
 
   const menuSections: { title: string; items: MenuItem[] }[] = user ? [
     {
@@ -29,6 +32,12 @@ export default function ProfileScreen() {
         { icon: 'heart-outline', label: 'Favorites', route: '/favorites' },
         { icon: 'time-outline', label: 'Reading History', route: '/history' },
         { icon: 'bookmark-outline', label: 'Bookmarks', route: '/(tabs)/notes' },
+      ],
+    },
+    {
+      title: 'Suggestions',
+      items: [
+        { icon: 'add-circle-outline', label: 'Request a Book', action: () => setShowRequest(true) },
       ],
     },
     {
@@ -82,7 +91,7 @@ export default function ProfileScreen() {
                     <TouchableOpacity
                       key={iIdx}
                       style={[styles.menuItem, iIdx < section.items.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
-                      onPress={() => { if (item.route) router.push(item.route as any); }}
+                      onPress={() => { if (item.action) item.action(); else if (item.route) router.push(item.route as any); }}
                       activeOpacity={0.6}
                     >
                       <View style={styles.menuLeft}>
@@ -136,6 +145,17 @@ export default function ProfileScreen() {
           </View>
         )}
       </ScrollView>
+      {!user && (
+        <TouchableOpacity
+          style={[styles.guestRequestBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+          onPress={() => setShowRequest(true)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="add-circle-outline" size={20} color={colors.textPrimary} />
+          <Text style={[styles.guestRequestText, { color: colors.textPrimary }]}>Request a Book</Text>
+        </TouchableOpacity>
+      )}
+      <RequestBookModal visible={showRequest} onClose={() => setShowRequest(false)} />
     </View>
   );
 }
@@ -143,25 +163,31 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingBottom: 100 },
-  headerTitle: { fontSize: FontSize.heading4, fontWeight: '700', letterSpacing: -0.3, paddingHorizontal: Spacing.xl, marginBottom: Spacing.xl },
-  userCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.xl, padding: Spacing.lg, borderRadius: BorderRadius.lg, marginBottom: Spacing.xxl, gap: Spacing.md },
+  headerTitle: { fontSize: FontSize.heading4, fontWeight: '700', letterSpacing: -0.3, paddingHorizontal: Spacing.xxl, marginBottom: Spacing.xl },
+  userCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.xxl, padding: Spacing.lg, borderRadius: BorderRadius.lg, marginBottom: Spacing.xxl, gap: Spacing.md },
   avatar: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
   avatarText: { fontSize: FontSize.xxl, fontWeight: '700' },
   userInfo: { flex: 1 },
   userName: { fontSize: FontSize.heading5, fontWeight: '600' },
   userEmail: { fontSize: FontSize.bodySm, marginTop: 2 },
-  section: { marginBottom: Spacing.lg, paddingHorizontal: Spacing.xl },
+  section: { marginBottom: Spacing.lg, paddingHorizontal: Spacing.xxl },
   sectionTitle: { fontSize: FontSize.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: Spacing.sm },
   sectionCard: { borderRadius: BorderRadius.lg, overflow: 'hidden' },
   menuItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
   menuLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
   menuLabel: { fontSize: FontSize.bodyMd, fontWeight: '500' },
-  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: Spacing.xl, marginTop: Spacing.md, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, gap: Spacing.sm, borderWidth: 1 },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: Spacing.xxl, marginTop: Spacing.md, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, gap: Spacing.sm, borderWidth: 1 },
   logoutText: { fontSize: FontSize.bodyMd, fontWeight: '600' },
-  guestWrap: { alignItems: 'center', paddingHorizontal: Spacing.xl, paddingTop: Spacing.xxxl },
+  guestWrap: { alignItems: 'center', paddingHorizontal: Spacing.xxl, paddingTop: Spacing.xxxl },
   guestAvatar: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.lg },
   guestTitle: { fontSize: FontSize.heading3, fontWeight: '700', marginBottom: Spacing.xs },
   guestSub: { fontSize: FontSize.bodyMd, textAlign: 'center', marginBottom: Spacing.xxl },
   loginBtn: { paddingVertical: Spacing.md + 4, paddingHorizontal: Spacing.xxxl, borderRadius: BorderRadius.lg },
   loginBtnText: { fontSize: FontSize.bodyMd, fontWeight: '700' },
+  guestRequestBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm,
+    marginHorizontal: Spacing.xl, paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg, borderWidth: 1, marginTop: Spacing.lg,
+  },
+  guestRequestText: { fontSize: FontSize.bodyMd, fontWeight: '600' },
 });

@@ -34,6 +34,7 @@ const PRELOAD_QUERIES = [
   { key: 'romance', query: 'romance novel' },
   { key: 'history', query: 'history' },
   { key: 'politics', query: 'politics government' },
+  { key: 'biography', query: 'biography autobiography' },
 ];
 
 export function preloadBooks() {
