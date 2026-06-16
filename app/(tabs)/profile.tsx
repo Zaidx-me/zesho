@@ -1,358 +1,167 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/context/AuthContext';
-import { logOut } from '../../src/services/auth';
-import { getUserBooks, getAllUserNotes } from '../../src/services/books';
 import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/context/ThemeContext';
+import { clearUserLibrary } from '../../src/services/localDb';
+
+interface MenuItem {
+  icon: string;
+  label: string;
+  route?: string;
+}
 
 export default function ProfileScreen() {
-  const { user, skipped } = useAuth();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { colors } = useTheme();
-  const [stats, setStats] = useState({ total: 0, reading: 0, finished: 0, notes: 0 });
+  const { user, signOut } = useAuth();
 
-  useFocusEffect(
-    useCallback(() => {
-      loadStats();
-    }, [])
-  );
+  const menuSections: { title: string; items: MenuItem[] }[] = user ? [
+    {
+      title: 'Library',
+      items: [
+        { icon: 'heart-outline', label: 'Favorites', route: '/favorites' },
+        { icon: 'time-outline', label: 'Reading History', route: '/history' },
+        { icon: 'bookmark-outline', label: 'Bookmarks', route: '/(tabs)/notes' },
+      ],
+    },
+    {
+      title: 'Settings',
+      items: [
+        { icon: 'settings-outline', label: 'Settings', route: '/settings' },
+        { icon: 'help-circle-outline', label: 'Help Center', route: '/help' },
+      ],
+    },
+  ] : [];
 
-  const loadStats = async () => {
+  const handleClearHistory = () => {
     if (!user) return;
-    try {
-      const [books, notes] = await Promise.all([
-        getUserBooks(user.uid),
-        getAllUserNotes(user.uid),
-      ]);
-      setStats({
-        total: books.length,
-        reading: books.filter(b => b.status === 'reading').length,
-        finished: books.filter(b => b.status === 'finished').length,
-        notes: notes.length,
-      });
-    } catch (error) {
-      console.error('Error loading stats:', error);
-    }
-  };
-
-  const handleLogout = async () => {
-    Alert.alert('Logout', 'Are you sure you want to logout?', [
+    Alert.alert('Clear History', 'Remove all reading history? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Logout',
-        style: 'destructive',
-        onPress: async () => {
-          await logOut();
-          router.replace('/(auth)/login');
-        },
-      },
+      { text: 'Clear', style: 'destructive', onPress: () => clearUserLibrary(user.uid) },
     ]);
   };
 
-  if (skipped || !user) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScrollView
-          contentContainerStyle={[styles.guestScroll, { paddingTop: insets.top + Spacing.lg }]}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Header */}
-          <Text style={[styles.title, { color: colors.textPrimary }]}>Profile</Text>
-
-          {/* Guest Card */}
-          <View style={[styles.guestCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-            <View style={styles.guestAvatar}>
-              <Ionicons name="person" size={48} color={colors.textSecondary} />
-            </View>
-            <Text style={[styles.guestName, { color: colors.textPrimary }]}>Guest User</Text>
-            <Text style={[styles.guestSubtext, { color: colors.textSecondary }]}>Sign in to track your reading progress</Text>
-            <TouchableOpacity style={[styles.signInButton, { backgroundColor: colors.primary }]} onPress={() => router.push('/(auth)/login')}>
-              <Ionicons name="log-in" size={18} color={colors.white} />
-              <Text style={[styles.signInText, { color: colors.white }]}>Sign In</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Menu */}
-          <View style={[styles.menuSection, { backgroundColor: colors.surfaceElevated }]}>
-            <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => router.push('/settings')}>
-              <View style={styles.menuLeft}>
-                <View style={[styles.menuIcon, { backgroundColor: 'rgba(255, 107, 107, 0.15)' }]}>
-                  <Ionicons name="settings-outline" size={20} color={colors.primary} />
-                </View>
-                <Text style={[styles.menuText, { color: colors.textPrimary }]}>Settings</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => router.push('/upload')}>
-              <View style={styles.menuLeft}>
-                <View style={[styles.menuIcon, { backgroundColor: 'rgba(90, 200, 250, 0.15)' }]}>
-                  <Ionicons name="cloud-upload-outline" size={20} color="#5AC8FA" />
-                </View>
-                <Text style={[styles.menuText, { color: colors.textPrimary }]}>Upload Book</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]}>
-              <View style={styles.menuLeft}>
-                <View style={[styles.menuIcon, { backgroundColor: 'rgba(52, 199, 89, 0.15)' }]}>
-                  <Ionicons name="help-circle-outline" size={20} color={colors.success} />
-                </View>
-                <Text style={[styles.menuText, { color: colors.textPrimary }]}>Help & Support</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem}>
-              <View style={styles.menuLeft}>
-                <View style={[styles.menuIcon, { backgroundColor: 'rgba(255, 159, 10, 0.15)' }]}>
-                  <Ionicons name="information-circle-outline" size={20} color={colors.warning} />
-                </View>
-                <Text style={[styles.menuText, { color: colors.textPrimary }]}>About Zesho</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.lg }]} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerSection}>
-          <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-            <Text style={[styles.avatarText, { color: colors.white }]}>
-              {user?.displayName?.charAt(0) || user?.email?.charAt(0) || '?'}
-            </Text>
-          </View>
-          <Text style={[styles.name, { color: colors.textPrimary }]}>{user?.displayName || 'Reader'}</Text>
-          <Text style={[styles.email, { color: colors.textSecondary }]}>{user?.email}</Text>
-        </View>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + Spacing.xl }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.headerTitle, { color: colors.textPrimary }]}>Profile</Text>
 
-        <View style={styles.statsGrid}>
-          <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="book" size={28} color={colors.primary} />
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>{stats.total}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Books</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="book-outline" size={28} color={colors.success} />
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>{stats.finished}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Finished</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="time" size={28} color={colors.warning} />
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>{stats.reading}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Reading</Text>
-          </View>
-          <View style={[styles.statCard, { backgroundColor: colors.surfaceElevated }]}>
-            <Ionicons name="pencil" size={28} color="#a29bfe" />
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>{stats.notes}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Notes</Text>
-          </View>
-        </View>
-
-        <View style={[styles.menuSection, { backgroundColor: colors.surfaceElevated }]}>
-          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => router.push('/settings')}>
-            <View style={styles.menuLeft}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(255, 107, 107, 0.15)' }]}>
-                <Ionicons name="settings-outline" size={20} color={colors.primary} />
+        {user ? (
+          <>
+            <View style={[styles.userCard, { backgroundColor: colors.surfaceElevated }]}>
+              <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+                <Text style={[styles.avatarText, { color: colors.onPrimary }]}>
+                  {user.displayName?.charAt(0)?.toUpperCase() || user.email?.charAt(0)?.toUpperCase() || 'U'}
+                </Text>
               </View>
-              <Text style={[styles.menuText, { color: colors.textPrimary }]}>Settings</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]} onPress={() => router.push('/upload')}>
-            <View style={styles.menuLeft}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(90, 200, 250, 0.15)' }]}>
-                <Ionicons name="cloud-upload-outline" size={20} color="#5AC8FA" />
+              <View style={styles.userInfo}>
+                <Text style={[styles.userName, { color: colors.textPrimary }]}>
+                  {user.displayName || user.email?.split('@')[0] || 'User'}
+                </Text>
+                <Text style={[styles.userEmail, { color: colors.textSecondary }]}>
+                  {user.email || ''}
+                </Text>
               </View>
-              <Text style={[styles.menuText, { color: colors.textPrimary }]}>Upload Book</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.menuItem, { borderBottomColor: colors.border }]}>
-            <View style={styles.menuLeft}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(52, 199, 89, 0.15)' }]}>
-                <Ionicons name="help-circle-outline" size={20} color={colors.success} />
+            {menuSections.map((section, sIdx) => (
+              <View key={sIdx} style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{section.title}</Text>
+                <View style={[styles.sectionCard, { backgroundColor: colors.surfaceElevated }]}>
+                  {section.items.map((item, iIdx) => (
+                    <TouchableOpacity
+                      key={iIdx}
+                      style={[styles.menuItem, iIdx < section.items.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
+                      onPress={() => { if (item.route) router.push(item.route as any); }}
+                      activeOpacity={0.6}
+                    >
+                      <View style={styles.menuLeft}>
+                        <Ionicons name={item.icon as any} size={20} color={colors.textSecondary} />
+                        <Text style={[styles.menuLabel, { color: colors.textPrimary }]}>{item.label}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
-              <Text style={[styles.menuText, { color: colors.textPrimary }]}>Help & Support</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
+            ))}
 
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuLeft}>
-              <View style={[styles.menuIcon, { backgroundColor: 'rgba(255, 159, 10, 0.15)' }]}>
-                <Ionicons name="information-circle-outline" size={20} color={colors.warning} />
+            <TouchableOpacity
+              style={[styles.menuItem, { backgroundColor: colors.surfaceElevated, marginHorizontal: Spacing.xl, borderRadius: BorderRadius.lg, marginBottom: Spacing.md }]}
+              onPress={handleClearHistory}
+              activeOpacity={0.7}
+            >
+              <View style={styles.menuLeft}>
+                <Ionicons name="trash-outline" size={20} color={colors.textSecondary} />
+                <Text style={[styles.menuLabel, { color: colors.textPrimary }]}>Clear Reading History</Text>
               </View>
-              <Text style={[styles.menuText, { color: colors.textPrimary }]}>About Zesho</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-          </TouchableOpacity>
-        </View>
+            </TouchableOpacity>
 
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={22} color={colors.error} />
-          <Text style={[styles.logoutText, { color: colors.error }]}>Logout</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.logoutBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}
+              onPress={() => Alert.alert('Log Out', 'Are you sure you want to log out?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Log Out', style: 'destructive', onPress: signOut },
+              ])}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="log-out-outline" size={20} color={colors.error} />
+              <Text style={[styles.logoutText, { color: colors.error }]}>Log Out</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <View style={styles.guestWrap}>
+            <View style={[styles.guestAvatar, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="person-outline" size={40} color={colors.textMuted} />
+            </View>
+            <Text style={[styles.guestTitle, { color: colors.textPrimary }]}>Guest Mode</Text>
+            <Text style={[styles.guestSub, { color: colors.textSecondary }]}>Sign in to save books and track progress</Text>
+            <TouchableOpacity
+              style={[styles.loginBtn, { backgroundColor: colors.buttonPrimary }]}
+              onPress={() => router.push('/(auth)/login')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.loginBtnText, { color: colors.buttonPrimaryText }]}>Sign In</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  title: {
-    fontSize: FontSize.title,
-    fontWeight: '800',
-    paddingHorizontal: Spacing.xxl,
-    marginBottom: Spacing.xxl,
-  },
-  content: {
-    paddingHorizontal: Spacing.xxl,
-    paddingBottom: 100,
-  },
-  headerSection: {
-    alignItems: 'center',
-    marginBottom: Spacing.xxxl,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  avatarText: {
-    fontSize: FontSize.hero,
-    fontWeight: '700',
-  },
-  name: {
-    fontSize: FontSize.xxl,
-    fontWeight: '700',
-  },
-  email: {
-    fontSize: FontSize.md,
-    marginTop: Spacing.xs,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
-    marginBottom: Spacing.xxxl,
-  },
-  statCard: {
-    width: '47%',
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  statValue: {
-    fontSize: FontSize.xxl,
-    fontWeight: '700',
-  },
-  statLabel: {
-    fontSize: FontSize.sm,
-  },
-  menuSection: {
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-    marginBottom: Spacing.xxl,
-  },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-  },
-  menuLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-  },
-  menuIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menuText: {
-    fontSize: FontSize.lg,
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.lg,
-    backgroundColor: 'rgba(255, 69, 58, 0.1)',
-    borderRadius: BorderRadius.lg,
-  },
-  logoutText: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-  },
-
-  // Guest styles
-  guestScroll: {
-    paddingHorizontal: Spacing.xxl,
-    paddingBottom: 100,
-  },
-  guestCard: {
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xxl,
-    alignItems: 'center',
-    marginBottom: Spacing.xxl,
-    borderWidth: 1,
-  },
-  guestAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  guestName: {
-    fontSize: FontSize.xxl,
-    fontWeight: '700',
-  },
-  guestSubtext: {
-    fontSize: FontSize.md,
-    marginTop: Spacing.sm,
-    textAlign: 'center',
-  },
-  signInButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.xxxl,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
-  },
-  signInText: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-  },
+  container: { flex: 1 },
+  scrollContent: { paddingBottom: 100 },
+  headerTitle: { fontSize: FontSize.heading4, fontWeight: '700', letterSpacing: -0.3, paddingHorizontal: Spacing.xl, marginBottom: Spacing.xl },
+  userCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.xl, padding: Spacing.lg, borderRadius: BorderRadius.lg, marginBottom: Spacing.xxl, gap: Spacing.md },
+  avatar: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
+  avatarText: { fontSize: FontSize.xxl, fontWeight: '700' },
+  userInfo: { flex: 1 },
+  userName: { fontSize: FontSize.heading5, fontWeight: '600' },
+  userEmail: { fontSize: FontSize.bodySm, marginTop: 2 },
+  section: { marginBottom: Spacing.lg, paddingHorizontal: Spacing.xl },
+  sectionTitle: { fontSize: FontSize.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: Spacing.sm },
+  sectionCard: { borderRadius: BorderRadius.lg, overflow: 'hidden' },
+  menuItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
+  menuLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md },
+  menuLabel: { fontSize: FontSize.bodyMd, fontWeight: '500' },
+  logoutBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginHorizontal: Spacing.xl, marginTop: Spacing.md, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, gap: Spacing.sm, borderWidth: 1 },
+  logoutText: { fontSize: FontSize.bodyMd, fontWeight: '600' },
+  guestWrap: { alignItems: 'center', paddingHorizontal: Spacing.xl, paddingTop: Spacing.xxxl },
+  guestAvatar: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: Spacing.lg },
+  guestTitle: { fontSize: FontSize.heading3, fontWeight: '700', marginBottom: Spacing.xs },
+  guestSub: { fontSize: FontSize.bodyMd, textAlign: 'center', marginBottom: Spacing.xxl },
+  loginBtn: { paddingVertical: Spacing.md + 4, paddingHorizontal: Spacing.xxxl, borderRadius: BorderRadius.lg },
+  loginBtnText: { fontSize: FontSize.bodyMd, fontWeight: '700' },
 });

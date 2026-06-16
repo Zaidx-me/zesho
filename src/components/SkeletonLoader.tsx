@@ -2,28 +2,45 @@ import React from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../context/ThemeContext';
-import { BorderRadius } from '../constants/theme';
+import { BorderRadius, Spacing } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 
 interface SkeletonLoaderProps {
   count?: number;
+  columns?: number;
 }
 
-export function SkeletonLoader({ count = 6 }: SkeletonLoaderProps) {
+export function SkeletonLoader({ count = 6, columns = 2 }: SkeletonLoaderProps) {
   const { colors } = useTheme();
+  const cardWidth = (width - Spacing.xl * 2 - Spacing.sm * (columns - 1)) / columns;
+  const cardHeight = cardWidth * 1.35;
+
   return (
     <View style={styles.container}>
       {Array.from({ length: count }).map((_, index) => (
-        <View key={index} style={styles.card}>
-          <LinearGradient
-            colors={[colors.surface, colors.surfaceElevated, colors.surface]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.image, { borderRadius: BorderRadius.md }]}
-          />
-          <View style={[styles.textBlock, { backgroundColor: colors.surfaceElevated }]} />
-          <View style={[styles.textBlockSmall, { backgroundColor: colors.surfaceElevated }]} />
+        <View key={index} style={[styles.card, { width: cardWidth }]}>
+          <View style={[styles.image, { borderRadius: BorderRadius.md, height: cardHeight, backgroundColor: colors.surface }]} />
+          <View style={[styles.textBlock, { backgroundColor: colors.surface }]} />
+          <View style={[styles.textBlockSmall, { backgroundColor: colors.surface }]} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export function SkeletonRow({ count = 4 }: { count?: number }) {
+  const { colors } = useTheme();
+  const cardWidth = 130;
+  const cardHeight = cardWidth * 1.35;
+
+  return (
+    <View style={styles.row}>
+      {Array.from({ length: count }).map((_, index) => (
+        <View key={index} style={[styles.rowCard, { width: cardWidth }]}>
+          <View style={[styles.image, { borderRadius: BorderRadius.md, height: cardHeight, backgroundColor: colors.surface }]} />
+          <View style={[styles.textBlock, { backgroundColor: colors.surface }]} />
+          <View style={[styles.textBlockSmall, { backgroundColor: colors.surface }]} />
         </View>
       ))}
     </View>
@@ -35,25 +52,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: Spacing.xl,
+  },
+  row: {
+    flexDirection: 'row',
+    paddingHorizontal: Spacing.xl,
+    gap: Spacing.sm,
   },
   card: {
-    width: (width - 48) / 2,
-    marginBottom: 16,
+    marginBottom: Spacing.lg,
+  },
+  rowCard: {
+    marginRight: Spacing.sm,
   },
   image: {
     width: '100%',
-    height: (width - 48) / 2 * 1.4,
-    marginBottom: 8,
+    marginBottom: Spacing.xs,
   },
   textBlock: {
-    height: 14,
-    borderRadius: 4,
+    height: 12,
+    borderRadius: BorderRadius.xs,
     marginBottom: 6,
   },
   textBlockSmall: {
     height: 10,
-    borderRadius: 4,
+    borderRadius: BorderRadius.xs,
     width: '60%',
   },
 });

@@ -16,11 +16,11 @@ function RootLayoutInner() {
 
   return (
     <>
-      <StatusBar style={isDark ? 'light' : 'dark'} backgroundColor={isDark ? '#000000' : '#F2F2F7'} />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: isDark ? '#000000' : '#F2F2F7' },
+          contentStyle: { backgroundColor: isDark ? '#0a0a0a' : '#ffffff' },
           animation: 'fade',
         }}
       />

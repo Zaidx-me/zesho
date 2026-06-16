@@ -1,8 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
-import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { storage, db } from './firebase';
-import { withTimeout } from './firestoreUtils';
+import { uploadPdfToCloudinary } from './cloudinary';
+import { saveUploadedBook, getUploadedBooks, getUploadedBooksBySemester } from './localDb';
+import { UploadedBook } from './localDb';
 
 export function extractDriveFileId(url: string): string | null {
   const patterns = [
@@ -25,16 +24,7 @@ export function buildDriveViewUrl(fileId: string): string {
   return `https://drive.google.com/file/d/${fileId}/view`;
 }
 
-export interface UploadedBook {
-  id: string;
-  title: string;
-  author: string;
-  semester: string;
-  course: string;
-  pdfUrl: string;
-  createdAt: number;
-  thumbnail?: string;
-}
+export { UploadedBook };
 
 export async function pickPdf(): Promise<DocumentPicker.DocumentPickerResult | null> {
   try {
@@ -56,31 +46,9 @@ export async function uploadPdf(
   onProgress?: (progress: number) => void
 ): Promise<string | null> {
   try {
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    const timestamp = Date.now();
-    const storageRef = ref(storage, `uploaded_books/${timestamp}_${fileName}`);
-    const uploadTask = uploadBytesResumable(storageRef, blob);
-
-    return new Promise((resolve, reject) => {
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          onProgress?.(progress);
-        },
-        (error) => {
-          console.error('Upload error:', error);
-          reject(null);
-        },
-        async () => {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          resolve(downloadUrl);
-        }
-      );
-    });
-  } catch (error) {
-    console.error('Error uploading PDF:', error);
+    return await uploadPdfToCloudinary(uri, fileName, onProgress);
+  } catch (error: any) {
+    console.error('Upload PDF error:', error?.message || error);
     return null;
   }
 }
@@ -94,48 +62,21 @@ export async function saveBookMetadata(data: {
   userId?: string;
 }): Promise<string | null> {
   try {
-    const docRef = await withTimeout(addDoc(collection(db, 'uploaded_books'), {
-      ...data,
+    const book: UploadedBook = {
+      id: `uploaded_${Date.now()}`,
+      title: data.title,
+      author: data.author,
+      semester: data.semester,
+      course: data.course,
+      pdfUrl: data.pdfUrl,
       createdAt: Date.now(),
-    }));
-    return docRef.id;
+    };
+    await saveUploadedBook(book);
+    return book.id;
   } catch (error) {
     console.error('Error saving book metadata:', error);
     return null;
   }
 }
 
-export async function getUploadedBooks(): Promise<UploadedBook[]> {
-  try {
-    const q = query(
-      collection(db, 'uploaded_books'),
-      orderBy('createdAt', 'desc')
-    );
-    const snapshot = await withTimeout(getDocs(q));
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    } as UploadedBook));
-  } catch (error) {
-    console.error('Error fetching uploaded books:', error);
-    return [];
-  }
-}
-
-export async function getUploadedBooksBySemester(semester: string): Promise<UploadedBook[]> {
-  try {
-    const q = query(
-      collection(db, 'uploaded_books'),
-      where('semester', '==', semester),
-      orderBy('createdAt', 'desc')
-    );
-    const snapshot = await withTimeout(getDocs(q));
-    return snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    } as UploadedBook));
-  } catch (error) {
-    console.error('Error fetching semester books:', error);
-    return [];
-  }
-}
+export { getUploadedBooks, getUploadedBooksBySemester };

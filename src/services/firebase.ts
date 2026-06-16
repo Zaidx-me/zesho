@@ -1,8 +1,7 @@
 import { initializeApp } from 'firebase/app';
+// @ts-ignore - getReactNativePersistence exists at runtime in firebase/auth for RN
 import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
-import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC43tafb5N_wN96Wwru0Md3y6pWb78vlmU",
@@ -16,9 +15,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage),
+  persistence: getReactNativePersistence(AsyncStorage),
 });
-
-export const db = getFirestore(app);
-export const storage = getStorage(app);
 export default app;

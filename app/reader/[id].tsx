@@ -15,7 +15,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { Spacing, FontSize } from '../../src/constants/theme';
 
 export default function ReaderScreen() {
-  const { url, title } = useLocalSearchParams<{ url: string; title: string }>();
+  const { url, title, downloadUrl } = useLocalSearchParams<{ url: string; title: string; downloadUrl: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
@@ -48,6 +48,14 @@ export default function ReaderScreen() {
     setLoading(false);
   };
 
+  const handleDownload = () => {
+    if (downloadUrl) {
+      Linking.openURL(downloadUrl);
+    } else if (url) {
+      Linking.openURL(url);
+    }
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -56,6 +64,11 @@ export default function ReaderScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>{title || 'Reading'}</Text>
+        {downloadUrl && (
+          <TouchableOpacity style={styles.backBtn} onPress={handleDownload}>
+            <Ionicons name="download-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.backBtn} onPress={() => webViewRef.current?.reload()}>
           <Ionicons name="refresh" size={20} color={colors.textPrimary} />
         </TouchableOpacity>

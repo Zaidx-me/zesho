@@ -4,14 +4,16 @@ import { useRouter } from 'expo-router';
 import { Book } from '../types';
 import { Spacing, FontSize, BorderRadius } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
+import { BookCoverPlaceholder, BookSkeleton } from './BookCoverPlaceholder';
 
 interface BookCardProps {
   book: Book;
   onPress?: () => void;
   size?: number;
+  loading?: boolean;
 }
 
-export function BookCard({ book, onPress, size = 140 }: BookCardProps) {
+export const BookCard = React.memo(function BookCard({ book, onPress, size = 140, loading }: BookCardProps) {
   const router = useRouter();
   const { colors } = useTheme();
 
@@ -23,56 +25,61 @@ export function BookCard({ book, onPress, size = 140 }: BookCardProps) {
     }
   };
 
-  const imageHeight = size * 1.45;
+  const imageHeight = size * 1.35;
+
+  if (loading) {
+    return (
+      <View style={[styles.card, { width: size }]}>
+        <BookSkeleton width={size} height={imageHeight} />
+      </View>
+    );
+  }
 
   return (
-    <TouchableOpacity style={[styles.card, { width: size }]} onPress={handlePress} activeOpacity={0.7}>
-      <View style={[styles.imageContainer, { width: size, height: imageHeight, backgroundColor: colors.surface }]}>
+    <TouchableOpacity
+      style={[styles.card, { width: size }]}
+      onPress={handlePress}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.imageContainer, { width: size, height: imageHeight }]}>
         {book.thumbnail ? (
-          <Image source={{ uri: book.thumbnail }} style={styles.image} />
+          <Image
+            source={{ uri: book.thumbnail }}
+            style={styles.image}
+          />
         ) : (
-          <View style={[styles.placeholder, { backgroundColor: colors.surfaceElevated }]}>
-            <Text style={[styles.placeholderText, { color: colors.primary }]}>{book.title.charAt(0)}</Text>
-          </View>
+          <BookCoverPlaceholder title={book.title} width={size} height={imageHeight} />
         )}
       </View>
-      <Text style={[styles.title, { color: colors.textPrimary }]} numberOfLines={2}>{book.title}</Text>
-      <Text style={[styles.author, { color: colors.textSecondary }]} numberOfLines={1}>{book.authors[0]}</Text>
+      <Text
+        style={[styles.title, { color: colors.textPrimary }]}
+        numberOfLines={2}
+      >
+        {book.title}
+      </Text>
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   imageContainer: {
     borderRadius: BorderRadius.md,
     overflow: 'hidden',
-    marginBottom: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   image: {
     width: '100%',
     height: '100%',
     resizeMode: 'cover',
   },
-  placeholder: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize: FontSize.title,
-    fontWeight: '800',
-  },
   title: {
-    fontSize: FontSize.sm,
-    fontWeight: '600',
+    fontSize: FontSize.bodySm,
+    fontWeight: '500',
     lineHeight: 18,
+    letterSpacing: -0.1,
   },
-  author: {
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
+
 });

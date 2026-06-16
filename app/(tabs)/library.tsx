@@ -1,162 +1,120 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  ActivityIndicator,
+  View, Text, StyleSheet, FlatList, TextInput,
+  ActivityIndicator, RefreshControl, TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { BookCard } from '../../src/components/BookCard';
-import { useAuth } from '../../src/context/AuthContext';
-import { getUserBooks } from '../../src/services/books';
-import { UserBook } from '../../src/types';
-import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 import { useTheme } from '../../src/context/ThemeContext';
-
-const TABS = ['All', 'Reading', 'Want to Read', 'Finished'];
+import { Book } from '../../src/types';
+import { getAllUrduBooks } from '../../src/services/urduBooks';
+import { getCachedBooks } from '../../src/services/bookCache';
+import { searchBooks } from '../../src/services/googleBooks';
+import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 
 export default function LibraryScreen() {
-  const { user, skipped } = useAuth();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { colors } = useTheme();
-  const [books, setBooks] = useState<UserBook[]>([]);
+  const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('All');
+  const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadBooks();
-    }, [])
-  );
-
-  const loadBooks = async () => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
+  const loadAllBooks = useCallback(async () => {
     try {
-      const userBooks = await getUserBooks(user.uid);
-      setBooks(userBooks);
+      setLoading(true);
+      // Load local Urdu books (instant)
+      const urduBooks = getAllUrduBooks(2138);
+      // Load other categories from cache or API
+      const [pop, fic, sci, po, re, sh] = await Promise.allSettled([
+        getCachedBooks('popular', 'popular fiction', 10),
+        getCachedBooks('fiction', 'classic literature', 10),
+        getCachedBooks('science', 'science nature', 10),
+        getCachedBooks('poetry', 'poetry anthology', 10),
+        getCachedBooks('religion', 'religion spirituality', 10),
+        getCachedBooks('self-help', 'self help motivation', 10),
+      ]);
+      const apiBooks: Book[] = [];
+      for (const r of [pop, fic, sci, po, re, sh]) {
+        if (r.status === 'fulfilled') apiBooks.push(...r.value);
+      }
+      // Deduplicate
+      const seen = new Set<string>();
+      const all: Book[] = [];
+      for (const book of [...urduBooks, ...apiBooks]) {
+        const key = book.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!seen.has(key)) { seen.add(key); all.push(book); }
+      }
+      setBooks(all);
     } catch (error) {
-      console.error('Error loading books:', error);
+      console.error('Error loading library:', error);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => { loadAllBooks(); }, [loadAllBooks]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAllBooks();
+    setRefreshing(false);
   };
 
-  const filteredBooks = activeTab === 'All'
-    ? books
-    : books.filter((book) => {
-        switch (activeTab) {
-          case 'Reading': return book.status === 'reading';
-          case 'Want to Read': return book.status === 'want_to_read';
-          case 'Finished': return book.status === 'finished';
-          default: return true;
-        }
-      });
-
-  const stats = {
-    total: books.length,
-    reading: books.filter(b => b.status === 'reading').length,
-    finished: books.filter(b => b.status === 'finished').length,
-    wantToRead: books.filter(b => b.status === 'want_to_read').length,
+  const handleSearch = async (q: string) => {
+    setQuery(q);
+    if (!q.trim()) { loadAllBooks(); return; }
+    setSearching(true);
+    try { const results = await searchBooks(q, 30); setBooks(results); } catch {}
+    setSearching(false);
   };
-
-  if (skipped || !user) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={[styles.header, { paddingTop: insets.top + Spacing.lg }]}>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>My Library</Text>
-        </View>
-        <View style={styles.emptyContainer}>
-          <Ionicons name="library-outline" size={64} color={colors.textSecondary} />
-          <Text style={[styles.emptyText, { color: colors.textPrimary }]}>Sign in to use Library</Text>
-          <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>Create an account to save books to your library</Text>
-          <TouchableOpacity style={[styles.signInButton, { backgroundColor: colors.primary }]} onPress={() => router.push('/(auth)/login')}>
-            <Text style={[styles.signInText, { color: colors.white }]}>Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.lg }]}>
-        <Text style={[styles.title, { color: colors.textPrimary }]}>My Library</Text>
-        <View style={[styles.statsRow, { backgroundColor: colors.surfaceElevated }]}>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.textPrimary }]}>{stats.total}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Total</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.primary }]}>{stats.reading}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Reading</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.success }]}>{stats.finished}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>Finished</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.warning }]}>{stats.wantToRead}</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>To Read</Text>
-          </View>
-        </View>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
+        <Text style={[styles.title, { color: colors.textPrimary }]}>Library</Text>
       </View>
 
-      <View style={styles.tabs}>
-        {TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tab, { backgroundColor: activeTab === tab ? colors.primary : colors.surfaceElevated }]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, { color: activeTab === tab ? colors.white : colors.textSecondary }]}>
-              {tab}
-            </Text>
+      <View style={[styles.searchWrap, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
+        <Ionicons name="search" size={18} color={colors.textSecondary} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.textPrimary }]}
+          placeholder="Search books..."
+          placeholderTextColor={colors.textMuted}
+          value={query}
+          onChangeText={handleSearch}
+          returnKeyType="search"
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => handleSearch('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="close-circle" size={18} color={colors.textMuted} />
           </TouchableOpacity>
-        ))}
+        )}
       </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+      {(loading || searching) ? (
+        <View style={styles.loaderWrap}>
+          <ActivityIndicator size="large" color={colors.textPrimary} />
+        </View>
       ) : (
         <FlatList
-          data={filteredBooks}
+          data={books}
           keyExtractor={(item) => item.id}
           numColumns={2}
-          contentContainerStyle={styles.list}
-          columnWrapperStyle={styles.listRow}
+          contentContainerStyle={styles.grid}
+          columnWrapperStyle={styles.gridRow}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textSecondary} />}
           renderItem={({ item }) => (
             <View style={styles.bookItem}>
-              <BookCard
-                book={{
-                  id: item.bookId,
-                  title: item.title,
-                  authors: item.authors,
-                  thumbnail: item.thumbnail,
-                  description: '',
-                  publishedDate: '',
-                  pageCount: 0,
-                  categories: [],
-                  averageRating: 0,
-                  ratingsCount: 0,
-                  previewLink: '',
-                  infoLink: '',
-                }}
-              />
+              <BookCard book={item} size={160} />
             </View>
           )}
           ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="library-outline" size={64} color={colors.textSecondary} />
-              <Text style={[styles.emptyText, { color: colors.textPrimary }]}>No books yet</Text>
-              <Text style={[styles.emptySubtext, { color: colors.textSecondary }]}>Start adding books to your library</Text>
+            <View style={styles.emptyWrap}>
+              <Ionicons name="book-outline" size={56} color={colors.textMuted} />
+              <Text style={[styles.emptyTitle, { color: colors.textPrimary }]}>No books found</Text>
             </View>
           }
         />
@@ -166,85 +124,15 @@ export default function LibraryScreen() {
 }
 
 const styles = StyleSheet.create({
-  header: {
-    paddingHorizontal: Spacing.xxl,
-    paddingBottom: Spacing.lg,
-  },
-  title: {
-    fontSize: FontSize.title,
-    fontWeight: '800',
-    marginBottom: Spacing.lg,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-  },
-  stat: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: FontSize.xxl,
-    fontWeight: '700',
-  },
-  statLabel: {
-    fontSize: FontSize.xs,
-    marginTop: 2,
-  },
-  tabs: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.xxl,
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  tab: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-  },
-  tabText: {
-    fontSize: FontSize.sm,
-    fontWeight: '500',
-  },
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  list: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.huge,
-  },
-  listRow: {
-    justifyContent: 'space-between',
-  },
-  bookItem: {
-    width: '48%',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.xxl,
-  },
-  emptyText: {
-    fontSize: FontSize.xl,
-    fontWeight: '600',
-    marginTop: Spacing.lg,
-  },
-  emptySubtext: {
-    fontSize: FontSize.md,
-    marginTop: Spacing.sm,
-    textAlign: 'center',
-  },
-  signInButton: {
-    marginTop: Spacing.xl,
-    paddingHorizontal: Spacing.xxxl,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
-  },
-  signInText: {
-    fontSize: FontSize.lg,
-    fontWeight: '600',
-  },
+  container: { flex: 1 },
+  header: { paddingHorizontal: Spacing.xl, paddingBottom: Spacing.sm },
+  title: { fontSize: FontSize.heading3, fontWeight: '800', letterSpacing: -0.5 },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.xl, paddingHorizontal: Spacing.md, borderRadius: BorderRadius.md, height: 44, gap: Spacing.sm, borderWidth: 1, marginBottom: Spacing.md },
+  searchInput: { flex: 1, fontSize: FontSize.bodyMd },
+  loaderWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  grid: { paddingHorizontal: Spacing.xl, paddingBottom: 100 },
+  gridRow: { justifyContent: 'space-between' },
+  bookItem: { width: '48%', marginBottom: Spacing.md },
+  emptyWrap: { alignItems: 'center', paddingTop: 100 },
+  emptyTitle: { fontSize: FontSize.heading5, fontWeight: '600', marginTop: Spacing.md },
 });

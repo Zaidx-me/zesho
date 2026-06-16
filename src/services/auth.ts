@@ -16,24 +16,14 @@ import { auth } from './firebase';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const WEB_CLIENT_ID = '991431752296-4t0cgi8u57093hcvfa381qt05tgtnd15.apps.googleusercontent.com';
 const ANDROID_CLIENT_ID = '933760260325-dvnt0fn63h775p55p7bhs1fug3929m7e.apps.googleusercontent.com';
-
-// Google OAuth redirect URI for Android:
-//   com.googleusercontent.apps.991431752296-4t0cgi8u57093hcvfa381qt05tgtnd15:/oauthredirect
-// This is auto-registered when you create an Android OAuth client ID in Google Cloud Console.
-// Email/password auth does not need any redirect URI config.
 
 // --- Google Auth ---
 export function useGoogleAuth() {
-  const redirectUri = Platform.OS === 'android'
-    ? `com.googleusercontent.apps.${ANDROID_CLIENT_ID}:/oauthredirect`
-    : undefined;
   const [request, response, promptAsync] = Google.useAuthRequest({
-    webClientId: WEB_CLIENT_ID,
+    clientId: ANDROID_CLIENT_ID,
     androidClientId: ANDROID_CLIENT_ID,
     scopes: ['profile', 'email'],
-    redirectUri,
   });
   return { request, response, promptAsync };
 }

@@ -1,32 +1,26 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Image,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  Share,
-  Linking,
+  View, Text, StyleSheet, ScrollView, Image, TouchableOpacity,
+  ActivityIndicator, Alert, Share, Linking, Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
-import { getBookById, getPdfUrl, getBookPageUrl } from '../../src/services/googleBooks';
+import { getBookById, getBookPageUrl, getPdfUrl } from '../../src/services/googleBooks';
 import { addBookToLibrary, isInLibrary, getNotesForBook, updateBookStatus, updateBookRating } from '../../src/services/books';
+import { getUploadedBooks } from '../../src/services/uploadService';
+import { isAdmin, deleteUploadedBook } from '../../src/services/admin';
 import { Book, Note } from '../../src/types';
 import { Spacing, FontSize, BorderRadius } from '../../src/constants/theme';
 
+const { width: SCREEN_W } = Dimensions.get('window');
+const COVER_W = SCREEN_W * 0.38;
+const COVER_H = COVER_W * 1.45;
 const STATUS_OPTIONS = ['want_to_read', 'reading', 'finished'] as const;
 const STATUS_LABELS: Record<string, string> = {
-  want_to_read: 'Want to Read',
-  reading: 'Reading',
-  finished: 'Finished',
+  want_to_read: 'Want to Read', reading: 'Reading', finished: 'Finished',
 };
 
 export default function BookDetailScreen() {
@@ -37,82 +31,96 @@ export default function BookDetailScreen() {
   const { colors } = useTheme();
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isUploadedBook, setIsUploadedBook] = useState(false);
+  const admin = isAdmin(user?.email);
   const [inLibrary, setInLibrary] = useState(false);
   const [bookStatus, setBookStatus] = useState<string>('want_to_read');
   const [userRating, setUserRating] = useState(0);
   const [notes, setNotes] = useState<Note[]>([]);
   const mountedRef = useRef(true);
 
-  useEffect(() => {
-    return () => { mountedRef.current = false; };
-  }, []);
-
+  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
   useEffect(() => { loadBook(); }, [id]);
 
   const loadBook = async () => {
     if (!id) return;
     setLoading(true);
-
-    // Load book metadata from memory (instant)
     const bookData = await getBookById(id);
     if (!mountedRef.current) return;
     setBook(bookData);
-
-    // If no user, stop here
-    if (!user || !bookData) {
-      if (mountedRef.current) setLoading(false);
-      return;
-    }
-
-    // Firestore calls in background - don't block the UI
+    const uploaded = await getUploadedBooks();
+    if (mountedRef.current) setIsUploadedBook(uploaded.some(b => b.id === id));
+    if (!user || !bookData) { if (mountedRef.current) setLoading(false); return; }
     Promise.all([
       isInLibrary(user.uid, id).catch(() => false),
       getNotesForBook(user.uid, id).catch(() => [] as Note[]),
     ]).then(([inLib, bookNotes]) => {
       if (mountedRef.current) {
         setInLibrary(inLib);
-        if (inLib) {
-          // Try to get status/rating from userBooks (simple approach)
-          setBookStatus('want_to_read');
-          setUserRating(0);
-        }
+        if (inLib) { setBookStatus('want_to_read'); setUserRating(0); }
         setNotes(bookNotes);
       }
     });
-
-    // Show UI immediately after book data loads (no waiting for Firestore)
     if (mountedRef.current) setLoading(false);
   };
 
   const handleShare = () => {
     if (!book) return;
-    Share.share({
-      message: `Read "${book.title}" by ${book.authors.join(', ')}\nhttps://archive.org/details/${book.id}`,
-      title: book.title,
-    });
+    const driveUrl = book.downloadUrl?.includes('drive.google.com')
+      ? book.downloadUrl
+      : book.previewLink?.includes('drive.google.com')
+      ? book.previewLink
+      : '';
+    const message = driveUrl
+      ? `Read "${book.title}" by ${book.authors.join(', ')}\n${driveUrl}`
+      : `Read "${book.title}" by ${book.authors.join(', ')}`;
+    Share.share({ message, title: book.title });
   };
 
   const handleReadNow = () => {
     if (!book) return;
-    if (book.downloadUrl && book.downloadUrl.includes('drive.google.com')) {
-      router.push(`/reader/${book.id}?url=${encodeURIComponent(book.downloadUrl)}&title=${encodeURIComponent(book.title)}`);
+    let readerUrl = '';
+    let readerDownloadUrl = '';
+    let openInBrowser = false;
+
+    if (book.id.startsWith('gutendex_')) {
+      const gId = parseInt(book.id.replace('gutendex_', ''), 10);
+      if (!isNaN(gId)) {
+        readerUrl = book.downloadUrl || `https://www.gutenberg.org/cache/epub/${gId}/pg${gId}.epub3.epub`;
+        readerDownloadUrl = `https://www.gutenberg.org/cache/epub/${gId}/pg${gId}.pdf`;
+      }
+    } else if (book.id.startsWith('hp_')) {
+      readerUrl = book.previewLink || `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(book.title)}`;
+    } else if (book.downloadUrl?.includes('archive.org')) {
+      const match = book.downloadUrl.match(/archive\.org\/download\/([^/]+)/);
+      if (match) {
+        readerUrl = `https://archive.org/embed/${match[1]}?ui=embed#mode/1up`;
+        readerDownloadUrl = book.downloadUrl;
+      }
+    } else if (book.previewLink?.includes('archive.org/embed')) {
+      readerUrl = book.previewLink;
+      readerDownloadUrl = book.downloadUrl || '';
+    } else if (book.downloadUrl?.includes('drive.google.com') || book.previewLink?.includes('drive.google.com')) {
+      openInBrowser = true;
+      readerUrl = book.downloadUrl || book.previewLink;
+    } else if (book.previewLink?.includes('openlibrary.org/works/')) {
+      openInBrowser = true;
+      readerUrl = book.previewLink;
+    } else if (book.previewLink) {
+      readerUrl = book.previewLink;
     } else {
-      const pageUrl = getBookPageUrl(book.id);
-      router.push(`/reader/${book.id}?url=${encodeURIComponent(pageUrl)}&title=${encodeURIComponent(book.title)}`);
+      readerUrl = getBookPageUrl(book.id);
+      openInBrowser = true;
     }
+
+    if (!readerUrl) { Alert.alert('Not Available', 'Could not find a way to read this book.'); return; }
+    if (openInBrowser) { Linking.openURL(readerUrl); return; }
+    router.push({ pathname: '/reader/[id]', params: { id: book.id, url: readerUrl, title: book.title, downloadUrl: readerDownloadUrl } });
   };
 
-  const handleDownloadPdf = () => {
+  const handleDownload = () => {
     if (!book) return;
-    const url = book.downloadUrl || getPdfUrl(book.id);
-    Alert.alert(
-      'Download PDF',
-      `Download "${book.title}" PDF?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Download', onPress: () => Linking.openURL(url) },
-      ]
-    );
+    Linking.openURL(book.downloadUrl || getPdfUrl(book.id));
   };
 
   const handleAddToLibrary = async () => {
@@ -124,106 +132,145 @@ export default function BookDetailScreen() {
       return;
     }
     if (!book) return;
-    try {
-      if (inLibrary) {
-        Alert.alert('Remove', 'Remove from library?', [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: () => setInLibrary(false) },
-        ]);
-      } else {
-        setInLibrary(true);
-        addBookToLibrary({
-          id: `${user.uid}_${book.id}`, bookId: book.id, userId: user.uid,
-          title: book.title, authors: book.authors, thumbnail: book.thumbnail,
-          addedAt: Date.now(), status: 'want_to_read', progress: 0, rating: 0,
-        }).catch(() => setInLibrary(false));
-      }
-    } catch {}
+    if (inLibrary) {
+      Alert.alert('Remove', 'Remove from library?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => setInLibrary(false) },
+      ]);
+    } else {
+      setInLibrary(true);
+      addBookToLibrary({
+        id: `${user.uid}_${book.id}`, bookId: book.id, userId: user.uid,
+        title: book.title, authors: book.authors, thumbnail: book.thumbnail,
+        addedAt: Date.now(), status: 'want_to_read', progress: 0, rating: 0,
+      }).catch(() => setInLibrary(false));
+    }
   };
 
   const handleStatusChange = (s: string) => {
     setBookStatus(s);
-    if (user && inLibrary && id) {
-      updateBookStatus(user.uid, id, s as any).catch(() => {});
-    }
+    if (user && inLibrary && id) updateBookStatus(user.uid, id, s as any).catch(() => {});
   };
 
   const handleRatingChange = (r: number) => {
     setUserRating(r);
-    if (user && inLibrary && id) {
-      updateBookRating(user.uid, id, r).catch(() => {});
-    }
+    if (user && inLibrary && id) updateBookRating(user.uid, id, r).catch(() => {});
   };
 
-  if (loading) return <View style={[styles.loading, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (loading) return (
+    <View style={[styles.loading, { backgroundColor: colors.background }]}>
+      <ActivityIndicator size="large" color={colors.buttonPrimary} />
+    </View>
+  );
+
   if (!book) return (
     <View style={[styles.loading, { backgroundColor: colors.background }]}>
       <Ionicons name="alert-circle-outline" size={48} color={colors.textSecondary} />
       <Text style={{ color: colors.textPrimary, marginTop: Spacing.md }}>Book not found</Text>
       <TouchableOpacity onPress={() => router.back()} style={{ marginTop: Spacing.lg }}>
-        <Text style={{ color: colors.primary }}>Go Back</Text>
+        <Text style={{ color: colors.buttonPrimary }}>Go Back</Text>
       </TouchableOpacity>
     </View>
   );
 
+  const hasDriveLink = book.downloadUrl?.includes('drive.google.com') || book.previewLink?.includes('drive.google.com');
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.bgWrap}>
-          {book.thumbnail ? <Image source={{ uri: book.thumbnail }} style={styles.bgImg} /> : null}
-          <LinearGradient colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.97)']} style={styles.bgGrad} />
-        </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 120 }}>
+        {/* Hero section with blurred background */}
+        <View style={styles.heroSection}>
+          {book.thumbnail ? <Image source={{ uri: book.thumbnail }} style={styles.heroBg} /> : null}
+          <View style={[styles.heroOverlay, { backgroundColor: colors.overlay }]} />
 
-        <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
-          <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.glass }]} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={24} color={colors.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.glass }]} onPress={handleShare}>
-            <Ionicons name="share-social" size={20} color={colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.body}>
-          <View style={styles.coverRow}>
-            <View style={[styles.coverWrap, { backgroundColor: colors.surface }]}>
-              {book.thumbnail
-                ? <Image source={{ uri: book.thumbnail }} style={styles.cover} />
-                : <View style={[styles.coverPh, { backgroundColor: colors.surfaceElevated }]}><Text style={[styles.coverLtr, { color: colors.primary }]}>{book.title[0]}</Text></View>
-              }
-            </View>
-            <View style={styles.meta}>
-              <Text style={[styles.bTitle, { color: colors.textPrimary }]} numberOfLines={3}>{book.title}</Text>
-              <Text style={[styles.bAuthor, { color: colors.primary }]}>{book.authors.join(', ')}</Text>
-              {book.publishedDate !== 'N/A' && <Text style={[styles.bDate, { color: colors.textMuted }]}>{book.publishedDate}</Text>}
-            </View>
+          {/* Nav bar */}
+          <View style={[styles.navBar, { paddingTop: insets.top + Spacing.sm }]}>
+            <TouchableOpacity style={[styles.navBtn, { backgroundColor: colors.glass }]} onPress={() => router.back()}>
+              <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.navBtn, { backgroundColor: colors.glass }]} onPress={handleShare}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={colors.textPrimary} />
+            </TouchableOpacity>
           </View>
 
-          <View style={[styles.stats, { backgroundColor: colors.glassLight }]}>
-            <View style={styles.stat}>
-              <Ionicons name="star" size={20} color="#FFD700" />
-              <Text style={[styles.statV, { color: colors.textPrimary }]}>{userRating > 0 ? `${userRating}.0` : book.averageRating > 0 ? book.averageRating.toFixed(1) : 'N/A'}</Text>
-              <Text style={[styles.statL, { color: colors.textSecondary }]}>Rating</Text>
-            </View>
-            <View style={[styles.statD, { backgroundColor: colors.border }]} />
-            <View style={styles.stat}>
-              <Ionicons name="document-text" size={20} color={colors.primary} />
-              <Text style={[styles.statV, { color: colors.textPrimary }]}>{book.pageCount > 0 ? book.pageCount : 'N/A'}</Text>
-              <Text style={[styles.statL, { color: colors.textSecondary }]}>Pages</Text>
-            </View>
-            <View style={[styles.statD, { backgroundColor: colors.border }]} />
-            <View style={styles.stat}>
-              <Ionicons name="bookmark" size={20} color={colors.success} />
-              <Text style={[styles.statV, { color: colors.textPrimary }]}>{inLibrary ? STATUS_LABELS[bookStatus] : 'New'}</Text>
-              <Text style={[styles.statL, { color: colors.textSecondary }]}>Status</Text>
+          {/* Cover + quick info */}
+          <View style={styles.heroContent}>
+            <View style={styles.coverShadow}>
+              {book.thumbnail ? (
+                <Image source={{ uri: book.thumbnail }} style={styles.cover} />
+              ) : (
+                <View style={[styles.coverPlaceholder, { backgroundColor: colors.surfaceElevated }]}>
+                  <Text style={[styles.coverLetter, { color: colors.buttonPrimary }]}>{book.title[0]}</Text>
+                </View>
+              )}
             </View>
           </View>
+        </View>
 
+        {/* Content body */}
+        <View style={[styles.body, { paddingHorizontal: Spacing.xl }]}>
+          {/* Title + Author */}
+          <Text style={[styles.bookTitle, { color: colors.textPrimary }]} numberOfLines={3}>{book.title}</Text>
+          <Text style={[styles.bookAuthor, { color: colors.coolSlate }]}>{book.authors.join(', ')}</Text>
+
+          {/* Rating + info row */}
+          <View style={styles.infoRow}>
+            <View style={[styles.infoChip, { backgroundColor: colors.surfaceElevated }]}>
+              <Ionicons name="star" size={14} color="#FFD700" />
+              <Text style={[styles.infoChipText, { color: colors.textPrimary }]}>
+                {userRating > 0 ? `${userRating}.0` : book.averageRating > 0 ? book.averageRating.toFixed(1) : 'N/A'}
+              </Text>
+            </View>
+            {book.pageCount > 0 && (
+              <View style={[styles.infoChip, { backgroundColor: colors.surfaceElevated }]}>
+                <Ionicons name="document-text-outline" size={14} color={colors.coolSlate} />
+                <Text style={[styles.infoChipText, { color: colors.textPrimary }]}>{book.pageCount} pages</Text>
+              </View>
+            )}
+            {book.publishedDate && book.publishedDate !== 'N/A' && (
+              <View style={[styles.infoChip, { backgroundColor: colors.surfaceElevated }]}>
+                <Ionicons name="calendar-outline" size={14} color={colors.coolSlate} />
+                <Text style={[styles.infoChipText, { color: colors.textPrimary }]}>{book.publishedDate}</Text>
+              </View>
+            )}
+            {hasDriveLink && (
+              <View style={[styles.infoChip, { backgroundColor: 'rgba(76, 175, 80, 0.15)' }]}>
+                <Ionicons name="cloud-download-outline" size={14} color={colors.success} />
+                <Text style={[styles.infoChipText, { color: colors.success }]}>Free</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Action buttons */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={[styles.readBtn, { backgroundColor: colors.buttonPrimary }]} onPress={handleReadNow} activeOpacity={0.8}>
+              <Ionicons name="book" size={18} color={colors.buttonPrimaryText} />
+              <Text style={[styles.readBtnText, { color: colors.buttonPrimaryText }]}>Read Now</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.downloadBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]} onPress={handleDownload} activeOpacity={0.8}>
+              <Ionicons name="arrow-down-outline" size={22} color={colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Library toggle */}
+          <TouchableOpacity
+            style={[styles.libraryBtn, { backgroundColor: inLibrary ? colors.success : colors.surfaceElevated, borderColor: inLibrary ? colors.success : colors.border }]}
+            onPress={handleAddToLibrary}
+            activeOpacity={0.7}
+          >
+            <Ionicons name={inLibrary ? 'heart' : 'heart-outline'} size={18} color={inLibrary ? '#fff' : colors.textPrimary} />
+            <Text style={[styles.libraryBtnText, { color: inLibrary ? '#fff' : colors.textPrimary }]}>
+              {inLibrary ? 'In Favourites' : 'Add to Favourite'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Rating picker */}
           {inLibrary && (
-            <View style={styles.pickerSection}>
-              <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Your Rating</Text>
-              <View style={styles.stars}>
-                {[1,2,3,4,5].map(s => (
-                  <TouchableOpacity key={s} onPress={() => handleRatingChange(s)}>
+            <View style={styles.ratingSection}>
+              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Your Rating</Text>
+              <View style={styles.starsRow}>
+                {[1, 2, 3, 4, 5].map(s => (
+                  <TouchableOpacity key={s} onPress={() => handleRatingChange(s)} style={styles.starBtn}>
                     <Ionicons name={s <= userRating ? 'star' : 'star-outline'} size={28} color={s <= userRating ? '#FFD700' : colors.surfaceElevated} />
                   </TouchableOpacity>
                 ))}
@@ -231,73 +278,75 @@ export default function BookDetailScreen() {
             </View>
           )}
 
+          {/* Status picker */}
           {inLibrary && (
-            <View style={styles.pickerSection}>
-              <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Status</Text>
+            <View style={styles.statusSection}>
+              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>Status</Text>
               <View style={styles.statusRow}>
                 {STATUS_OPTIONS.map(s => (
                   <TouchableOpacity
                     key={s}
-                    style={[styles.statusBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }, bookStatus === s && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                    style={[styles.statusChip, { backgroundColor: colors.surfaceElevated, borderColor: colors.border },
+                      bookStatus === s && { backgroundColor: colors.buttonPrimary, borderColor: colors.buttonPrimary }]}
                     onPress={() => handleStatusChange(s)}
                   >
-                    <Text style={[styles.statusBtnT, { color: colors.textSecondary }, bookStatus === s && { color: colors.white }]}>{STATUS_LABELS[s]}</Text>
+                    <Text style={[styles.statusChipText, { color: colors.textSecondary },
+                      bookStatus === s && { color: colors.buttonPrimaryText }]}>{STATUS_LABELS[s]}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
             </View>
           )}
 
-          <View style={styles.btns}>
-            <TouchableOpacity style={[styles.readBtn, { backgroundColor: colors.primary }]} onPress={handleReadNow}>
-              <Ionicons name="book" size={20} color={colors.white} />
-              <Text style={[styles.readBtnT, { color: colors.white }]}>Read Now</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.btnsRow}>
-            <TouchableOpacity
-              style={[styles.smBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }, inLibrary && { backgroundColor: colors.success, borderColor: colors.success }]}
-              onPress={handleAddToLibrary}
-            >
-              <Ionicons name={inLibrary ? 'checkmark-circle' : 'add-circle'} size={16} color={inLibrary ? colors.white : colors.primary} />
-              <Text style={[styles.smBtnT, { color: colors.primary }, inLibrary && { color: colors.white }]}>{inLibrary ? 'Saved' : 'Save'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.smBtn, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]} onPress={handleDownloadPdf}>
-              <Ionicons name="download-outline" size={16} color={colors.primary} />
-              <Text style={[styles.smBtnT, { color: colors.primary }]}>Download PDF</Text>
-            </TouchableOpacity>
-          </View>
-
+          {/* Description */}
           {book.description ? (
             <View style={styles.section}>
-              <Text style={[styles.secTitle, { color: colors.textPrimary }]}>About</Text>
-              <Text style={[styles.desc, { color: colors.textSecondary }]}>{book.description}</Text>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>About</Text>
+              <Text style={[styles.description, { color: colors.textSecondary }]}>{book.description}</Text>
             </View>
           ) : null}
 
+          {/* Categories */}
           {book.categories.length > 0 && (
             <View style={styles.section}>
-              <Text style={[styles.secTitle, { color: colors.textPrimary }]}>Genres</Text>
-              <View style={styles.tags}>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Genres</Text>
+              <View style={styles.tagsRow}>
                 {book.categories.map((c, i) => (
                   <View key={i} style={[styles.tag, { backgroundColor: colors.surfaceElevated, borderColor: colors.border }]}>
-                    <Text style={[styles.tagT, { color: colors.textSecondary }]}>{c}</Text>
+                    <Text style={[styles.tagText, { color: colors.textSecondary }]}>{c}</Text>
                   </View>
                 ))}
               </View>
             </View>
           )}
 
+          {/* Notes */}
           {notes.length > 0 && (
             <View style={styles.section}>
-              <Text style={[styles.secTitle, { color: colors.textPrimary }]}>Notes ({notes.length})</Text>
+              <Text style={[styles.sectionTitle, { color: colors.textPrimary }]}>Notes ({notes.length})</Text>
               {notes.map(n => (
-                <View key={n.id} style={[styles.noteCard, { backgroundColor: colors.surfaceElevated, borderLeftColor: colors.primary }]}>
-                  <Text style={[styles.noteT, { color: colors.textPrimary }]}>{n.content}</Text>
-                  <Text style={[styles.noteD, { color: colors.textMuted }]}>{new Date(n.createdAt).toLocaleDateString()}</Text>
+                <View key={n.id} style={[styles.noteCard, { backgroundColor: colors.surfaceElevated, borderLeftColor: colors.buttonPrimary }]}>
+                  <Text style={[styles.noteText, { color: colors.textPrimary }]}>{n.content}</Text>
+                  <Text style={[styles.noteDate, { color: colors.textMuted }]}>{new Date(n.createdAt).toLocaleDateString()}</Text>
                 </View>
               ))}
             </View>
+          )}
+
+          {/* Admin delete */}
+          {admin && isUploadedBook && (
+            <TouchableOpacity
+              style={[styles.deleteBtn, { backgroundColor: colors.error }]}
+              onPress={() => {
+                Alert.alert('Delete Book', `Remove "${book.title}" permanently?`, [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: async () => { await deleteUploadedBook(id); router.back(); } },
+                ]);
+              }}
+            >
+              <Ionicons name="trash-outline" size={16} color="#fff" />
+              <Text style={styles.deleteBtnText}>Delete Book</Text>
+            </TouchableOpacity>
           )}
         </View>
       </ScrollView>
@@ -308,45 +357,48 @@ export default function BookDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: Spacing.sm },
-  bgWrap: { position: 'absolute', top: 0, left: 0, right: 0, height: 300, overflow: 'hidden' },
-  bgImg: { width: '100%', height: '100%', resizeMode: 'cover', opacity: 0.3 },
-  bgGrad: { ...StyleSheet.absoluteFillObject },
-  header: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingBottom: Spacing.sm },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
-  body: { marginTop: 70, paddingHorizontal: Spacing.xxl, paddingBottom: 100 },
-  coverRow: { flexDirection: 'row', gap: Spacing.lg, marginBottom: Spacing.xxl },
-  coverWrap: { width: 110, height: 165, borderRadius: BorderRadius.md, overflow: 'hidden', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+  heroSection: { height: 340, justifyContent: 'flex-end', overflow: 'hidden' },
+  heroBg: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%', resizeMode: 'cover', opacity: 0.25 },
+  heroOverlay: { ...StyleSheet.absoluteFillObject },
+  navBar: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingBottom: Spacing.md },
+  navBtn: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  heroContent: { alignItems: 'center', paddingBottom: Spacing.xl },
+  coverShadow: {
+    width: COVER_W, height: COVER_H, borderRadius: BorderRadius.lg, overflow: 'hidden',
+    elevation: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 16,
+  },
   cover: { width: '100%', height: '100%', resizeMode: 'cover' },
-  coverPh: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
-  coverLtr: { fontSize: FontSize.hero, fontWeight: '800' },
-  meta: { flex: 1, justifyContent: 'center' },
-  bTitle: { fontSize: FontSize.xl, fontWeight: '800', marginBottom: Spacing.sm, lineHeight: 26 },
-  bAuthor: { fontSize: FontSize.md, fontWeight: '500', marginBottom: 4 },
-  bDate: { fontSize: FontSize.sm },
-  stats: { flexDirection: 'row', borderRadius: BorderRadius.lg, padding: Spacing.lg, justifyContent: 'space-around', alignItems: 'center', marginBottom: Spacing.xxl },
-  stat: { alignItems: 'center', flex: 1, gap: 3 },
-  statV: { fontSize: FontSize.sm, fontWeight: '700' },
-  statL: { fontSize: FontSize.xs },
-  statD: { width: 1, height: 32 },
-  pickerSection: { marginBottom: Spacing.lg },
-  pickerLabel: { fontSize: FontSize.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: Spacing.sm },
-  stars: { flexDirection: 'row', gap: Spacing.md },
+  coverPlaceholder: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
+  coverLetter: { fontSize: FontSize.heroDisplay, fontWeight: '800' },
+  body: { paddingTop: Spacing.md },
+  bookTitle: { fontSize: FontSize.heading2, fontWeight: '800', lineHeight: 34, letterSpacing: -0.5, marginBottom: Spacing.xs },
+  bookAuthor: { fontSize: FontSize.bodyMd, fontWeight: '500', marginBottom: Spacing.lg },
+  infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm, marginBottom: Spacing.xl },
+  infoChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.xs, borderRadius: BorderRadius.full },
+  infoChipText: { fontSize: FontSize.xs, fontWeight: '600' },
+  actionRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md },
+  readBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md + 4, borderRadius: BorderRadius.lg },
+  readBtnText: { fontSize: FontSize.bodyMd, fontWeight: '700' },
+  downloadBtn: { width: 50, height: 50, borderRadius: BorderRadius.lg, justifyContent: 'center', alignItems: 'center', borderWidth: 1 },
+  libraryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1, marginBottom: Spacing.xl },
+  libraryBtnText: { fontSize: FontSize.bodyMd, fontWeight: '600' },
+  ratingSection: { marginBottom: Spacing.lg },
+  sectionLabel: { fontSize: FontSize.xs, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: Spacing.sm },
+  starsRow: { flexDirection: 'row', gap: Spacing.md },
+  starBtn: { padding: 2 },
+  statusSection: { marginBottom: Spacing.xl },
   statusRow: { flexDirection: 'row', gap: Spacing.sm },
-  statusBtn: { flex: 1, paddingVertical: Spacing.md, borderRadius: BorderRadius.md, alignItems: 'center', borderWidth: 1 },
-  statusBtnT: { fontSize: FontSize.sm, fontWeight: '600' },
-  btns: { marginBottom: Spacing.sm },
-  readBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md + 2, borderRadius: BorderRadius.lg },
-  readBtnT: { fontSize: FontSize.md, fontWeight: '700' },
-  btnsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.xxl },
-  smBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.xs, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1 },
-  smBtnT: { fontSize: FontSize.sm, fontWeight: '600' },
-  section: { marginBottom: Spacing.xxl },
-  secTitle: { fontSize: FontSize.lg, fontWeight: '700', marginBottom: Spacing.md },
-  desc: { fontSize: FontSize.md, lineHeight: 24 },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-  tag: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full, borderWidth: 1 },
-  tagT: { fontSize: FontSize.sm },
-  noteCard: { borderRadius: BorderRadius.md, padding: Spacing.lg, marginBottom: Spacing.sm, borderLeftWidth: 3 },
-  noteT: { fontSize: FontSize.md, lineHeight: 22 },
-  noteD: { fontSize: FontSize.xs, marginTop: Spacing.sm },
+  statusChip: { flex: 1, paddingVertical: Spacing.sm + 2, borderRadius: BorderRadius.md, alignItems: 'center', borderWidth: 1 },
+  statusChipText: { fontSize: FontSize.sm, fontWeight: '600' },
+  section: { marginBottom: Spacing.xl },
+  sectionTitle: { fontSize: FontSize.heading5, fontWeight: '700', marginBottom: Spacing.md },
+  description: { fontSize: FontSize.bodyMd, lineHeight: 24 },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  tag: { paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, borderRadius: BorderRadius.full, borderWidth: 1 },
+  tagText: { fontSize: FontSize.sm },
+  noteCard: { borderRadius: BorderRadius.md, padding: Spacing.md, marginBottom: Spacing.sm, borderLeftWidth: 3 },
+  noteText: { fontSize: FontSize.bodyMd, lineHeight: 22 },
+  noteDate: { fontSize: FontSize.xs, marginTop: Spacing.xs },
+  deleteBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, paddingVertical: Spacing.md, borderRadius: BorderRadius.lg, marginBottom: Spacing.xl },
+  deleteBtnText: { color: '#fff', fontSize: FontSize.md, fontWeight: '700' },
 });
